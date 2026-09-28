@@ -28,6 +28,7 @@ type Config struct {
 	DatabaseConnectTimeout  time.Duration
 	DatabaseQueryTimeout    time.Duration
 	DatabaseRollbackTimeout time.Duration
+	IdempotencyTTL          time.Duration
 }
 
 func LoadConfig() (Config, error) {
@@ -103,6 +104,7 @@ func LoadConfig() (Config, error) {
 		{"DATABASE_CONNECT_TIMEOUT", &cfg.DatabaseConnectTimeout},
 		{"DATABASE_QUERY_TIMEOUT", &cfg.DatabaseQueryTimeout},
 		{"DATABASE_ROLLBACK_TIMEOUT", &cfg.DatabaseRollbackTimeout},
+		{"IDEMPOTENCY_TTL", &cfg.IdempotencyTTL},
 	}
 
 	for _, settings := range durations {
@@ -112,6 +114,12 @@ func LoadConfig() (Config, error) {
 		}
 
 		*settings.target = value
+	}
+
+	if cfg.IdempotencyTTL < time.Microsecond {
+		return Config{}, fmt.Errorf(
+			"IDEMPOTENCY_TTL must be at least 1 microsecond",
+		)
 	}
 
 	return cfg, nil

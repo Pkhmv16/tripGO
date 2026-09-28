@@ -54,8 +54,9 @@ func run() error {
 	txManager := infrastructure.NewTxManager(pool,
 		cfg.DatabaseRollbackTimeout, cfg.DatabaseQueryTimeout)
 
-	tripService := service.NewTripService(tripRepo, historyRepo, txManager,
-		infrastructure.UUIDGenerator{})
+	idempotencyRepo := repository.NewPgIdempotencyRepository(pool, cfg.DatabaseQueryTimeout, cfg.IdempotencyTTL)
+
+	tripService := service.NewTripService(tripRepo, historyRepo, idempotencyRepo, txManager, infrastructure.UUIDGenerator{})
 
 	tripHandler := handler.NewTripHandler(tripService, cfg.HTTPMaxBodyBytes)
 	healthHandler := handler.NewHealthHandler(pool, cfg.DatabaseQueryTimeout)

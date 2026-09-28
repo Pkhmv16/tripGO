@@ -19,7 +19,7 @@ import (
 type TripService interface {
 	GetTrip(ctx context.Context, tripId string) (*domain.Trip, error)
 	FinishTrip(ctx context.Context, tripId string) (*domain.Trip, error)
-	CreateTrip(ctx context.Context, params service.CreateTripParams) (*domain.Trip, error)
+	CreateTrip(ctx context.Context, params service.CreateTripParams) (*domain.Trip, bool, error)
 }
 
 type TripHandler struct {
@@ -66,7 +66,7 @@ func (h *TripHandler) FinishTrip(w http.ResponseWriter, r *http.Request, tripId 
 
 func (h *TripHandler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.CreateTripParams) {
 	r.Body = http.MaxBytesReader(w, r.Body, h.maxBodyBytes)
-	
+
 	var raw json.RawMessage
 	decoder := json.NewDecoder(r.Body)
 
@@ -109,7 +109,13 @@ func (h *TripHandler) CreateTrip(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 
-	trip, err := h.tripService.CreateTrip(r.Context(), service.CreateTripParams{
+	var idempotencyKey *string
+
+	if params.IdempotencyKey != nil {
+		idempotencyKey = new(params.IdempotencyKey.String())
+	}
+
+	trip, created, err := h.tripService.CreateTrip(r.Context(), service.CreateTripParams{
 		UserId:         domain.UserId(body.UserId.String()),
 		DriverId:       domain.DriverId(body.DriverId.String()),
 		StartLatitude:  body.StartPoint.Latitude,
@@ -117,6 +123,7 @@ func (h *TripHandler) CreateTrip(w http.ResponseWriter, r *http.Request, params 
 		EndLatitude:    body.EndPoint.Latitude,
 		EndLongitude:   body.EndPoint.Longitude,
 		Price:          body.Price,
+		IdempotencyKey: idempotencyKey,
 	})
 
 	if err != nil {
@@ -130,8 +137,14 @@ func (h *TripHandler) CreateTrip(w http.ResponseWriter, r *http.Request, params 
 		return
 	}
 
-	w.Header().Set("Location", "/api/v1/trips/"+response.Id.String())
-	writeJson(w, r, http.StatusCreated, "application/json", response)
+	status := http.StatusOK
+
+	if created {
+		status = http.StatusCreated
+		w.Header().Set("Location", "/api/v1/trips/"+response.Id.String())
+	}
+
+	writeJson(w, r, status, "application/json", response)
 }
 
 func validateCreateTripFields(raw json.RawMessage) error {
@@ -237,6 +250,13 @@ func writeError(w http.ResponseWriter, r *http.Request, err error) {
 		kind = "driver-busy"
 		title = "Driver busy"
 		detail = "Driver already has an active trip"
+
+	case errors.Is(err, domain.ErrIdempotencyConflict):
+		status = http.StatusConflict
+		code = "idempotency_conflict"
+		kind = "idempotency-conflict"
+		title = "Idempotency conflict"
+		detail = "Idempotency-Key was already used with a different request body"
 	}
 
 	writeJson(w, r, status, "application/problem+json", api.Problem{
