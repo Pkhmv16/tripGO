@@ -125,3 +125,25 @@ WHERE id = $1 AND status = 'active'
 
 При двух конкурентных завершениях одна транзакция обновляет строку, а другая после ожидания проверяет условие повторно. После успешного коммита первой транзакции вторая не перезаписывает `finished_at`.
 
+## Запуск в Docker
+
+Перед запуском поднимите окружение с PostgreSQL и подготовьте
+`.env` и `.env.local`, как описано выше.
+
+Соберите образ из корня проекта:
+
+```bash
+docker build -f deploy/Dockerfile -t trip-service:lab1 .
+```
+Запустите сервис:
+```bash
+docker run --rm \
+  --env-file .env \
+  --env-file .env.local \
+  --add-host=host.docker.internal:host-gateway \
+  -p 8080:8080 \
+  -e 'DATABASE_URL=postgres://tripgo:tripgo@host.docker.internal:21032/tripgo?sslmode=disable' \
+  trip-service:lab1
+```
+
+Размер образа: 21.5MB
