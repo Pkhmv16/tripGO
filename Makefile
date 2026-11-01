@@ -9,7 +9,7 @@ export GOOSE_MIGRATION_DIR := migrations
 .PHONY: run generate migrate migrate-down migrate-status test
 
 run:
-	go run ./cmd/trip-service
+	go run ./cmd/service
 
 generate:
 	go tool oapi-codegen \
