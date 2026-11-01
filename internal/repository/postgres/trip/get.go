@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v5"
+
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres/transaction"
-	"github.com/jackc/pgx/v5"
 )
 
 func (r *PgTripRepository) Get(ctx context.Context, tripId domaintrip.TripId) (*domaintrip.Trip, error) {
@@ -44,7 +45,6 @@ func (r *PgTripRepository) get(ctx context.Context, tripId domaintrip.TripId, fo
 		queryBuilder = queryBuilder.Suffix("FOR UPDATE")
 	}
 	query, args, err := queryBuilder.ToSql()
-
 	if err != nil {
 		return nil, fmt.Errorf("build select trip query: %w", err)
 	}
@@ -69,7 +69,8 @@ func (r *PgTripRepository) get(ctx context.Context, tripId domaintrip.TripId, fo
 		&trip.StartedAt,
 		&trip.FinishedAt,
 		&trip.CreatedAt,
-		&trip.UpdatedAt)
+		&trip.UpdatedAt,
+	)
 
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, domaintrip.ErrTripNotFound

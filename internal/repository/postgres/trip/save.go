@@ -6,9 +6,10 @@ import (
 	"fmt"
 
 	"github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v5/pgconn"
+
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres/transaction"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func (r *PgTripRepository) Create(ctx context.Context, trip *domaintrip.Trip) error {
@@ -40,7 +41,6 @@ func (r *PgTripRepository) Create(ctx context.Context, trip *domaintrip.Trip) er
 			trip.FinishedAt,
 			trip.CreatedAt,
 			trip.UpdatedAt).ToSql()
-
 	if err != nil {
 		return fmt.Errorf("build insert trip: %w", err)
 	}

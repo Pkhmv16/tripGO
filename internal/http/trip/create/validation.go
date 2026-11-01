@@ -9,6 +9,10 @@ import (
 	api "github.com/Pkhmv16/tripGO/internal/generated"
 )
 
+const (
+	bodyField = "body"
+)
+
 func validateCreateTripFields(raw json.RawMessage) error {
 	fields, err := requireFields(raw, "", "user_id", "driver_id", "start_point", "end_point", "price")
 	if err != nil {
@@ -27,7 +31,7 @@ func requireFields(raw json.RawMessage, path string, names ...string) (map[strin
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		field := path
 		if field == "" {
-			field = "body"
+			field = bodyField
 		}
 		return nil, &trip.ValidationError{Field: field, Reason: "must be a JSON object"}
 	}

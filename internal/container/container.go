@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/Pkhmv16/tripGO/internal/config"
 	api "github.com/Pkhmv16/tripGO/internal/generated"
 	transport "github.com/Pkhmv16/tripGO/internal/http"
@@ -24,7 +26,6 @@ import (
 	createusecase "github.com/Pkhmv16/tripGO/internal/usecase/trip/create"
 	finishusecase "github.com/Pkhmv16/tripGO/internal/usecase/trip/finish"
 	getusecase "github.com/Pkhmv16/tripGO/internal/usecase/trip/get"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Container struct {

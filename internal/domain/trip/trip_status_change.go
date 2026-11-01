@@ -4,15 +4,17 @@ import (
 	"time"
 )
 
-type TripStatusChangeId int64
-type TripStatusChange struct {
-	Id         TripStatusChangeId
-	TripId     TripId
-	FromStatus *TripStatus
-	ToStatus   TripStatus
-	Reason     *string
-	ChangedAt  time.Time
-}
+type (
+	TripStatusChangeId int64
+	TripStatusChange   struct {
+		Id         TripStatusChangeId
+		TripId     TripId
+		FromStatus *TripStatus
+		ToStatus   TripStatus
+		Reason     *string
+		ChangedAt  time.Time
+	}
+)
 
 func NewTripStatusChange(
 	tripId TripId,

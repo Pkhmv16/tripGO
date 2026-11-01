@@ -6,10 +6,13 @@ export GOOSE_DRIVER := postgres
 export GOOSE_DBSTRING := $(DATABASE_URL)
 export GOOSE_MIGRATION_DIR := migrations
 
-.PHONY: run generate migrate migrate-down migrate-status test
+.PHONY: run generate migrate migrate-down migrate-status test test-integration lint
 
 run:
 	go run ./cmd/service
+
+lint:
+	golangci-lint run ./...
 
 generate:
 	go tool oapi-codegen \
@@ -29,4 +32,7 @@ migrate-status:
 	go tool goose status
 
 test:
-	go test -race ./...
+	go test -race -cover ./...
+
+test-integration:
+	go test -race -p=1 -tags=integration -count=1 -timeout=5m ./internal/infra/postgres/transaction ./internal/repository/postgres/trip

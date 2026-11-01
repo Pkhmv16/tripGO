@@ -4,8 +4,10 @@ import (
 	"time"
 )
 
-type TripId string
-type UserId string
+type (
+	TripId string
+	UserId string
+)
 
 type DriverId string
 

@@ -2,8 +2,9 @@ package response
 
 import (
 	"encoding/json"
-	api "github.com/Pkhmv16/tripGO/internal/generated"
 	"net/http"
+
+	api "github.com/Pkhmv16/tripGO/internal/generated"
 )
 
 func JSON(w http.ResponseWriter, r *http.Request, status int, contentType string, value any) {
@@ -23,5 +24,5 @@ func JSON(w http.ResponseWriter, r *http.Request, status int, contentType string
 
 	w.Header().Set("Content-Type", contentType)
 	w.WriteHeader(status)
-	w.Write(body)
+	_, _ = w.Write(body)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/Masterminds/squirrel"
+
 	"github.com/Pkhmv16/tripGO/internal/domain/trip"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres/transaction"
 )
@@ -28,10 +29,10 @@ func (r *PgIdempotencyRepository) Save(
 			key,
 			requestHash,
 			tripId,
-			squirrel.Expr("clock_timestamp() + ?::bigint * interval '1 microsecond'", r.ttl.Microseconds())).
+			squirrel.Expr("clock_timestamp() + ?::bigint * interval '1 microsecond'", r.ttl.Microseconds()),
+		).
 		PlaceholderFormat(squirrel.Dollar).
 		ToSql()
-
 	if err != nil {
 		return fmt.Errorf("build tripidempotency insert: %w", err)
 	}

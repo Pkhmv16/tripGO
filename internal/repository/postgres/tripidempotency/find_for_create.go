@@ -1,6 +1,7 @@
 package idempotency
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -8,9 +9,10 @@ import (
 	"fmt"
 
 	"github.com/Masterminds/squirrel"
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Pkhmv16/tripGO/internal/domain/trip"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres/transaction"
-	"github.com/jackc/pgx/v5"
 )
 
 func (r *PgIdempotencyRepository) FindForCreate(
@@ -27,7 +29,15 @@ func (r *PgIdempotencyRepository) FindForCreate(
 	defer cancel()
 
 	digest := sha256.Sum256([]byte("trip-create:" + key))
-	lockID := int64(binary.BigEndian.Uint64(digest[:8]))
+
+	var lockID int64
+	if err := binary.Read(
+		bytes.NewReader(digest[:8]),
+		binary.BigEndian,
+		&lockID,
+	); err != nil {
+		return nil, fmt.Errorf("decode idempotency lock ID: %w", err)
+	}
 
 	query, args, err := squirrel.Select().
 		Column("pg_advisory_xact_lock(?)", lockID).
@@ -59,7 +69,6 @@ func (r *PgIdempotencyRepository) FindForCreate(
 		Where(squirrel.Eq{"key": key}).
 		PlaceholderFormat(squirrel.Dollar).
 		ToSql()
-
 	if err != nil {
 		return nil, fmt.Errorf("build tripidempotency lookup: %w", err)
 	}

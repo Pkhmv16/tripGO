@@ -18,7 +18,7 @@ type TxManager struct {
 
 type txKey struct{}
 
-func NewTxManager(pool *pgxpool.Pool, rollbackTimeout time.Duration, queryTimeout time.Duration) *TxManager {
+func NewTxManager(pool *pgxpool.Pool, rollbackTimeout, queryTimeout time.Duration) *TxManager {
 	return &TxManager{
 		pool:            pool,
 		rollbackTimeout: rollbackTimeout,

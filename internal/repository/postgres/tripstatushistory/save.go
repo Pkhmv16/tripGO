@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/Masterminds/squirrel"
+
 	"github.com/Pkhmv16/tripGO/internal/domain/trip"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres/transaction"
 )
@@ -19,7 +20,6 @@ func (r *PgTripStatusChangeRepository) Save(ctx context.Context, tripStatusChang
 			tripStatusChange.Reason,
 			tripStatusChange.ChangedAt).
 		ToSql()
-
 	if err != nil {
 		return fmt.Errorf("build insert trip_status_history: %w", err)
 	}

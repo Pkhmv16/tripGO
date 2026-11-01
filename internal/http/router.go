@@ -9,11 +9,13 @@ import (
 	"github.com/Pkhmv16/tripGO/internal/http/trip/get"
 )
 
-type CreateHandler = create.Handler
-type GetHandler = get.Handler
-type FinishHandler = finish.Handler
-type HealthHandler = health.Handler
-type ReadyHandler = ready.Handler
+type (
+	CreateHandler = create.Handler
+	GetHandler    = get.Handler
+	FinishHandler = finish.Handler
+	HealthHandler = health.Handler
+	ReadyHandler  = ready.Handler
+)
 
 type Handler struct {
 	*CreateHandler

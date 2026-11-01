@@ -3,9 +3,10 @@ package trip
 import (
 	"fmt"
 
+	"github.com/google/uuid"
+
 	"github.com/Pkhmv16/tripGO/internal/domain/trip"
 	api "github.com/Pkhmv16/tripGO/internal/generated"
-	"github.com/google/uuid"
 )
 
 func ToApiTrip(trip *trip.Trip) (*api.Trip, error) {

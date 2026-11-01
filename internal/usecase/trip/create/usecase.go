@@ -84,7 +84,8 @@ func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (*d
 			nil,
 			"active",
 			new("Trip initialized by usecase"),
-			now)
+			now,
+		)
 
 		if err := uc.tripStatusChangeRepo.Save(ctx, tripStatusChange); err != nil {
 			return err
@@ -100,7 +101,6 @@ func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (*d
 		created = true
 		return nil
 	})
-
 	if err != nil {
 		return nil, false, err
 	}

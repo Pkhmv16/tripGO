@@ -43,11 +43,11 @@ func (uc *Usecase) FinishTrip(ctx context.Context, tripId string) (*domaintrip.T
 			&previousStatus,
 			trip.Status,
 			new("Trip finished by usecase"),
-			now)
+			now,
+		)
 
 		return uc.tripStatusChangeRepo.Save(ctx, tripStatusChange)
 	})
-
 	if err != nil {
 		return nil, err
 	}

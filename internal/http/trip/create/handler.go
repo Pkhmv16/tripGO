@@ -6,13 +6,14 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/google/uuid"
+
 	"github.com/Pkhmv16/tripGO/internal/domain/trip"
 	api "github.com/Pkhmv16/tripGO/internal/generated"
 	"github.com/Pkhmv16/tripGO/internal/http/domainerror"
 	httpresponse "github.com/Pkhmv16/tripGO/internal/http/response"
 	triphttp "github.com/Pkhmv16/tripGO/internal/http/trip"
 	"github.com/Pkhmv16/tripGO/internal/model"
-	"github.com/google/uuid"
 )
 
 type Handler struct {
@@ -31,12 +32,12 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 	decoder := json.NewDecoder(r.Body)
 
 	if err := decoder.Decode(&raw); err != nil {
-		domainerror.Write(w, r, &trip.ValidationError{Field: "body", Reason: "must be valid JSON within the size limit"})
+		domainerror.Write(w, r, &trip.ValidationError{Field: bodyField, Reason: "must be valid JSON within the size limit"})
 		return
 	}
 	var extra json.RawMessage
 	if err := decoder.Decode(&extra); err != io.EOF {
-		domainerror.Write(w, r, &trip.ValidationError{Field: "body", Reason: "must contain one JSON object"})
+		domainerror.Write(w, r, &trip.ValidationError{Field: bodyField, Reason: "must contain one JSON object"})
 		return
 	}
 
@@ -50,7 +51,7 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 	bodyDecoder.DisallowUnknownFields()
 
 	if err := bodyDecoder.Decode(&body); err != nil {
-		domainerror.Write(w, r, &trip.ValidationError{Field: "body", Reason: "invalid field type or format"})
+		domainerror.Write(w, r, &trip.ValidationError{Field: bodyField, Reason: "invalid field type or format"})
 		return
 	}
 
@@ -91,7 +92,6 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 		Price:          body.Price,
 		IdempotencyKey: idempotencyKey,
 	})
-
 	if err != nil {
 		domainerror.Write(w, r, err)
 		return
