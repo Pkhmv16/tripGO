@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"testing"
 
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/mock/gomock"
 
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
@@ -26,11 +27,11 @@ func TestUsecaseGetTripSuccess(t *testing.T) {
 	}
 
 	repo.EXPECT().
-		Get(ctx, id).
+		Get(gomock.Any(), id).
 		Return(want, nil).
 		Times(1)
 
-	uc := get.New(repo)
+	uc := get.New(repo, noop.NewTracerProvider().Tracer("test"))
 
 	got, err := uc.GetTrip(ctx, string(id))
 	if err != nil {
@@ -58,8 +59,8 @@ func TestUsecaseGetTripError(t *testing.T) {
 			ctx := context.Background()
 			id := domaintrip.TripId("1f0a9c62-4a1c-4f2e-9d33-2a4bb0f0b111")
 
-			repo.EXPECT().Get(ctx, id).Return(nil, tt.err).Times(1)
-			uc := get.New(repo)
+			repo.EXPECT().Get(gomock.Any(), id).Return(nil, tt.err).Times(1)
+			uc := get.New(repo, noop.NewTracerProvider().Tracer("test"))
 
 			got, err := uc.GetTrip(ctx, string(id))
 			if !errors.Is(err, tt.err) {

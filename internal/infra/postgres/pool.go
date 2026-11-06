@@ -5,9 +5,10 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/otel/trace"
 )
 
-func NewPostgresPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
+func NewPostgresPool(ctx context.Context, cfg Config, tracing trace.TracerProvider) (*pgxpool.Pool, error) {
 	poolConfig, err := pgxpool.ParseConfig(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid DATABASE_URL")
@@ -17,6 +18,7 @@ func NewPostgresPool(ctx context.Context, cfg Config) (*pgxpool.Pool, error) {
 	poolConfig.MinConns = cfg.MinConns
 	poolConfig.MaxConnLifetime = cfg.MaxConnLifetime
 	poolConfig.ConnConfig.ConnectTimeout = cfg.ConnectTimeout
+	poolConfig.ConnConfig.Tracer = newQueryTracer(tracing)
 
 	startupCtx, cancel := context.WithTimeout(ctx, cfg.ConnectTimeout)
 	defer cancel()

@@ -44,6 +44,10 @@ type Container struct {
 
 func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	logger := telemetry.NewLogger(os.Stdout, cfg.LogLevel)
+	tracing, err := telemetry.NewTracerProvider(ctx, telemetry.TracingConfig{Endpoint: cfg.OTelEndpoint, Protocol: cfg.OTelProtocol, Sampler: cfg.OTelSampler, Ratio: cfg.OTelSamplerRatio}, logger)
+	if err != nil {
+		return nil, err
+	}
 	pool, err := postgres.NewPostgresPool(ctx,
 		postgres.Config{
 			URL:             cfg.DatabaseURL,
@@ -51,15 +55,9 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 			MinConns:        cfg.DatabaseMinConns,
 			MaxConnLifetime: cfg.DatabaseMaxConnLifetime,
 			ConnectTimeout:  cfg.DatabaseConnectTimeout,
-		})
+		}, tracing)
 	if err != nil {
-		return nil, err
-	}
-
-	tracing, err := telemetry.NewTracerProvider(ctx, telemetry.TracingConfig{Endpoint: cfg.OTelEndpoint, Protocol: cfg.OTelProtocol, Sampler: cfg.OTelSampler, Ratio: cfg.OTelSamplerRatio}, logger)
-	if err != nil {
-		pool.Close()
-		return nil, err
+		return nil, errors.Join(err, tracing.Shutdown(ctx))
 	}
 	router := chi.NewRouter()
 	router.Use(middleware.Logging(logger))
@@ -73,9 +71,10 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 
 	idempotencyRepo := tripidempotency.NewPgIdempotencyRepository(pool, cfg.DatabaseQueryTimeout, cfg.IdempotencyTTL)
 
-	createUsecase := createusecase.New(tripRepo, historyRepo, idempotencyRepo, txManager, uuid.Generator{}, logger)
-	getUsecase := getusecase.New(tripRepo)
-	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager, logger)
+	tracer := tracing.Tracer("github.com/Pkhmv16/tripGO/internal/usecase/trip")
+	createUsecase := createusecase.New(tripRepo, historyRepo, idempotencyRepo, txManager, uuid.Generator{}, logger, tracer)
+	getUsecase := getusecase.New(tripRepo, tracer)
+	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager, logger, tracer)
 
 	createHandler := create.New(createUsecase, cfg.HTTPMaxBodyBytes)
 	getHandler := get.New(getUsecase)

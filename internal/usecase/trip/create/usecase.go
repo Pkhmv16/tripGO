@@ -9,11 +9,16 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
+
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
 	"github.com/Pkhmv16/tripGO/internal/model"
 )
 
 type Usecase struct {
+	tracer               trace.Tracer
 	logger               logger
 	tripRepo             tripRepository
 	tripStatusChangeRepo tripStatusChangeRepository
@@ -22,11 +27,20 @@ type Usecase struct {
 	idGenerator          idGenerator
 }
 
-func New(repo tripRepository, history tripStatusChangeRepository, keys idempotencyRepository, tx txManager, ids idGenerator, log logger) *Usecase {
-	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, idempotencyRepo: keys, txManager: tx, idGenerator: ids, logger: log}
+func New(repo tripRepository, history tripStatusChangeRepository, keys idempotencyRepository, tx txManager, ids idGenerator, log logger, tracer trace.Tracer) *Usecase {
+	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, idempotencyRepo: keys, txManager: tx, idGenerator: ids, logger: log, tracer: tracer}
 }
 
-func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (*domaintrip.Trip, bool, error) {
+func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (result *domaintrip.Trip, created bool, err error) {
+	ctx, span := uc.tracer.Start(ctx, "trip.create")
+	defer span.End()
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			span.SetAttributes(attribute.String("error.type", fmt.Sprintf("%T", err)))
+		}
+	}()
 	var requestHash []byte
 
 	if p.IdempotencyKey != nil {
@@ -38,10 +52,7 @@ func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (*d
 		}
 	}
 
-	var result *domaintrip.Trip
-	var created bool
-
-	err := uc.txManager.Do(ctx, func(ctx context.Context) error {
+	err = uc.txManager.Do(ctx, func(ctx context.Context) error {
 		if p.IdempotencyKey != nil {
 			record, err := uc.idempotencyRepo.FindForCreate(ctx, *p.IdempotencyKey)
 			if err != nil {

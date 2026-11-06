@@ -7,6 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/mock/gomock"
 
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
@@ -45,11 +49,13 @@ func TestUsecaseFinishTrip(t *testing.T) {
 			history := NewMocktripStatusChangeRepository(ctrl)
 			tx := NewMocktxManager(ctrl)
 			log := NewMocklogger(ctrl)
-			uc := finish.New(repo, history, tx, log)
-			ctx := context.Background()
+			tracer, recorder := newTestTracer(t)
+			uc := finish.New(repo, history, tx, log, tracer)
+			ctx, parent := tracer.Start(context.Background(), "HTTP")
+			defer parent.End()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
 			txCompleted := false
-			expectCompletionLog(t, log, ctx, tt.wantErr, dependencyErr, &txCompleted)
+			expectCompletionLog(t, log, tt.wantErr, dependencyErr, &txCompleted)
 			startedAt := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
 			original := &domaintrip.Trip{
 				Id: "trip-id", UserId: "user-id", DriverId: "driver-id",
@@ -62,9 +68,9 @@ func TestUsecaseFinishTrip(t *testing.T) {
 			snapshot := *original
 			var updated *domaintrip.Trip
 			if tt.failAt == "begin" {
-				tx.EXPECT().Do(ctx, gomock.Any()).Return(tt.wantErr)
+				tx.EXPECT().Do(gomock.Any(), gomock.Any()).Return(tt.wantErr)
 			} else {
-				tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
+				tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
 					err := fn(txCtx)
 					txCompleted = true
 					if tt.failAt == "commit" {
@@ -120,6 +126,7 @@ func TestUsecaseFinishTrip(t *testing.T) {
 			}
 			before := time.Now()
 			got, err := uc.FinishTrip(ctx, string(original.Id))
+			assertUsecaseSpan(t, recorder, parent, tt.wantErr)
 			after := time.Now()
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("FinishTrip() error = %v, want %v", err, tt.wantErr)
@@ -146,15 +153,46 @@ func TestUsecaseFinishTrip(t *testing.T) {
 	}
 }
 
-func expectCompletionLog(t *testing.T, log *Mocklogger, ctx context.Context, wantErr, dependencyErr error, txCompleted *bool) {
+func expectCompletionLog(t *testing.T, log *Mocklogger, wantErr, dependencyErr error, txCompleted *bool) {
 	t.Helper()
 	if wantErr == nil {
-		log.EXPECT().InfoContext(ctx, "trip completed", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
+		log.EXPECT().InfoContext(gomock.Any(), "trip completed", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
 			if !*txCompleted {
 				t.Error("success was logged before transaction completed")
 			}
 		})
 	} else if errors.Is(wantErr, dependencyErr) {
-		log.EXPECT().ErrorContext(ctx, "trip completion failed", "trip_id", "trip-id", "error", wantErr)
+		log.EXPECT().ErrorContext(gomock.Any(), "trip completion failed", "trip_id", "trip-id", "error", wantErr)
+	}
+}
+
+func newTestTracer(t *testing.T) (trace.Tracer, *tracetest.SpanRecorder) {
+	t.Helper()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	tracer := provider.Tracer("test")
+	return tracer, recorder
+}
+
+func assertUsecaseSpan(t *testing.T, recorder *tracetest.SpanRecorder, parent trace.Span, wantErr error) {
+	t.Helper()
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	span := spans[0]
+	if span.Name() != "trip.finish" || span.Parent().SpanID() != parent.SpanContext().SpanID() || span.SpanContext().TraceID() != parent.SpanContext().TraceID() {
+		t.Errorf("usecase span is not a child of the HTTP span: %v", span)
+	}
+	if wantErr != nil && (span.Status().Code != codes.Error || len(span.Events()) == 0) {
+		t.Error("failed usecase span has no error status or error event")
+	}
+	if wantErr == nil && span.Status().Code == codes.Error {
+		t.Error("successful usecase span has error status")
 	}
 }

@@ -3,27 +3,42 @@ package finish
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
 )
 
 type Usecase struct {
+	tracer               trace.Tracer
 	logger               logger
 	tripRepo             tripRepository
 	tripStatusChangeRepo tripStatusChangeRepository
 	txManager            txManager
 }
 
-func New(repo tripRepository, history tripStatusChangeRepository, tx txManager, log logger) *Usecase {
-	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, txManager: tx, logger: log}
+func New(repo tripRepository, history tripStatusChangeRepository, tx txManager, log logger, tracer trace.Tracer) *Usecase {
+	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, txManager: tx, logger: log, tracer: tracer}
 }
 
-func (uc *Usecase) FinishTrip(ctx context.Context, tripId string) (*domaintrip.Trip, error) {
+func (uc *Usecase) FinishTrip(ctx context.Context, tripId string) (result *domaintrip.Trip, err error) {
+	ctx, span := uc.tracer.Start(ctx, "trip.finish")
+	defer span.End()
+	defer func() {
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+			span.SetAttributes(attribute.String("error.type", fmt.Sprintf("%T", err)))
+		}
+	}()
 	var finalTrip *domaintrip.Trip
 	domainTripId := domaintrip.TripId(tripId)
 
-	err := uc.txManager.Do(ctx, func(ctx context.Context) error {
+	err = uc.txManager.Do(ctx, func(ctx context.Context) error {
 		trip, err := uc.tripRepo.GetForUpdate(ctx, domainTripId)
 		if err != nil {
 			return err

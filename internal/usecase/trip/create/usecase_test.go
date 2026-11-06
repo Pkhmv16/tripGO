@@ -9,6 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/mock/gomock"
 
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
@@ -59,20 +64,22 @@ func TestUsecaseCreateTrip(t *testing.T) {
 			tx := NewMocktxManager(ctrl)
 			ids := NewMockidGenerator(ctrl)
 			log := NewMocklogger(ctrl)
-			uc := create.New(repo, history, keys, tx, ids, log)
-			ctx := context.Background()
+			tracer, recorder := newTestTracer(t)
+			uc := create.New(repo, history, keys, tx, ids, log, tracer)
+			ctx, parent := tracer.Start(context.Background(), "HTTP")
+			defer parent.End()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
 			txCompleted := false
-			expectCreationLog(t, log, ctx, tt.wantErr, dependencyErr, &txCompleted)
+			expectCreationLog(t, log, tt.wantErr, dependencyErr, &txCompleted)
 			p := createParams()
 			key := "7f1c2a54-6d0e-4a3b-9f21-0c8e5b3a77d1"
 			if tt.withKey {
 				p.IdempotencyKey = &key
 			}
 			if tt.failAt == "begin" {
-				tx.EXPECT().Do(ctx, gomock.Any()).Return(tt.wantErr)
+				tx.EXPECT().Do(gomock.Any(), gomock.Any()).Return(tt.wantErr)
 			} else {
-				tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
+				tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
 					err := fn(txCtx)
 					txCompleted = true
 					if tt.failAt == "commit" {
@@ -132,6 +139,7 @@ func TestUsecaseCreateTrip(t *testing.T) {
 			}
 			before := time.Now()
 			got, created, err := uc.CreateTrip(ctx, p)
+			assertUsecaseSpan(t, recorder, parent, tt.wantErr)
 			after := time.Now()
 			if !errors.Is(err, tt.wantErr) {
 				t.Fatalf("CreateTrip() error = %v, want %v", err, tt.wantErr)
@@ -177,14 +185,14 @@ func TestUsecaseCreateTripIdempotency(t *testing.T) {
 			tx := NewMocktxManager(ctrl)
 			ids := NewMockidGenerator(ctrl)
 			log := NewMocklogger(ctrl)
-			uc := create.New(repo, history, keys, tx, ids, log)
+			uc := create.New(repo, history, keys, tx, ids, log, noop.NewTracerProvider().Tracer("test"))
 			ctx := context.Background()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
 			p := createParams()
 			p.StartLatitude = 0
 			p.IdempotencyKey = new("7f1c2a54-6d0e-4a3b-9f21-0c8e5b3a77d1")
-			log.EXPECT().InfoContext(ctx, "trip created", "trip_id", "trip-id")
-			tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error { return fn(txCtx) }).Times(2)
+			log.EXPECT().InfoContext(gomock.Any(), "trip created", "trip_id", "trip-id")
+			tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error { return fn(txCtx) }).Times(2)
 			var savedHash []byte
 			gomock.InOrder(
 				keys.EXPECT().FindForCreate(txCtx, *p.IdempotencyKey).Return(nil, nil),
@@ -209,7 +217,7 @@ func TestUsecaseCreateTripIdempotency(t *testing.T) {
 			lookup := keys.EXPECT().FindForCreate(txCtx, *p.IdempotencyKey).Return(record, nil)
 			wantErr := tt.getErr
 			if tt.getErr != nil {
-				log.EXPECT().ErrorContext(ctx, "trip creation failed", "error", tt.getErr)
+				log.EXPECT().ErrorContext(gomock.Any(), "trip creation failed", "error", tt.getErr)
 			}
 			if tt.conflict {
 				wantErr = domaintrip.ErrIdempotencyConflict
@@ -255,15 +263,46 @@ func assertCreatedTrip(t *testing.T, got *domaintrip.Trip, p model.CreateTripPar
 	}
 }
 
-func expectCreationLog(t *testing.T, log *Mocklogger, ctx context.Context, wantErr, dependencyErr error, txCompleted *bool) {
+func expectCreationLog(t *testing.T, log *Mocklogger, wantErr, dependencyErr error, txCompleted *bool) {
 	t.Helper()
 	if wantErr == nil {
-		log.EXPECT().InfoContext(ctx, "trip created", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
+		log.EXPECT().InfoContext(gomock.Any(), "trip created", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
 			if !*txCompleted {
 				t.Error("success was logged before transaction completed")
 			}
 		})
 	} else if errors.Is(wantErr, dependencyErr) {
-		log.EXPECT().ErrorContext(ctx, "trip creation failed", "error", wantErr)
+		log.EXPECT().ErrorContext(gomock.Any(), "trip creation failed", "error", wantErr)
+	}
+}
+
+func newTestTracer(t *testing.T) (trace.Tracer, *tracetest.SpanRecorder) {
+	t.Helper()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	t.Cleanup(func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Error(err)
+		}
+	})
+	tracer := provider.Tracer("test")
+	return tracer, recorder
+}
+
+func assertUsecaseSpan(t *testing.T, recorder *tracetest.SpanRecorder, parent trace.Span, wantErr error) {
+	t.Helper()
+	spans := recorder.Ended()
+	if len(spans) != 1 {
+		t.Fatalf("ended spans = %d, want 1", len(spans))
+	}
+	span := spans[0]
+	if span.Name() != "trip.create" || span.Parent().SpanID() != parent.SpanContext().SpanID() || span.SpanContext().TraceID() != parent.SpanContext().TraceID() {
+		t.Errorf("usecase span is not a child of the HTTP span: %v", span)
+	}
+	if wantErr != nil && (span.Status().Code != codes.Error || len(span.Events()) == 0) {
+		t.Error("failed usecase span has no error status or error event")
+	}
+	if wantErr == nil && span.Status().Code == codes.Error {
+		t.Error("successful usecase span has error status")
 	}
 }
