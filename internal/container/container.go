@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/Pkhmv16/tripGO/internal/config"
@@ -40,6 +41,7 @@ type Container struct {
 	pool    *pgxpool.Pool
 	logger  *slog.Logger
 	tracing *sdktrace.TracerProvider
+	metrics *sdkmetric.MeterProvider
 }
 
 func New(ctx context.Context, cfg config.Config) (*Container, error) {
@@ -48,6 +50,16 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+	metrics, err := telemetry.NewMeterProvider(ctx, telemetry.MetricsConfig{Endpoint: cfg.OTelEndpoint, Protocol: cfg.OTelProtocol})
+	if err != nil {
+		return nil, errors.Join(err, tracing.Shutdown(ctx))
+	}
+	router := chi.NewRouter()
+	metricsMiddleware, err := middleware.Metrics(metrics.Meter("github.com/Pkhmv16/tripGO/internal/http"), router)
+	if err != nil {
+		return nil, errors.Join(err, tracing.Shutdown(ctx), metrics.Shutdown(ctx))
+	}
+	router.Use(middleware.Logging(logger), metricsMiddleware)
 	pool, err := postgres.NewPostgresPool(ctx,
 		postgres.Config{
 			URL:             cfg.DatabaseURL,
@@ -57,10 +69,8 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 			ConnectTimeout:  cfg.DatabaseConnectTimeout,
 		}, tracing)
 	if err != nil {
-		return nil, errors.Join(err, tracing.Shutdown(ctx))
+		return nil, errors.Join(err, tracing.Shutdown(ctx), metrics.Shutdown(ctx))
 	}
-	router := chi.NewRouter()
-	router.Use(middleware.Logging(logger))
 
 	tripRepo := triprepository.NewPgTripRepository(pool, cfg.DatabaseQueryTimeout)
 
@@ -105,7 +115,7 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
-	return &Container{server: server, pool: pool, logger: logger, tracing: tracing}, nil
+	return &Container{server: server, pool: pool, logger: logger, tracing: tracing, metrics: metrics}, nil
 }
 
 func (c *Container) Run() error {
@@ -137,12 +147,12 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-poolClosed:
-		shutdownErr = errors.Join(shutdownErr, c.tracing.Shutdown(ctx))
+		shutdownErr = errors.Join(shutdownErr, c.tracing.Shutdown(ctx), c.metrics.Shutdown(ctx))
 		if shutdownErr == nil {
 			c.logger.InfoContext(ctx, "service stopped")
 		}
 		return shutdownErr
 	case <-ctx.Done():
-		return errors.Join(shutdownErr, fmt.Errorf("close database pool: %w", ctx.Err()), c.tracing.Shutdown(ctx))
+		return errors.Join(shutdownErr, fmt.Errorf("close database pool: %w", ctx.Err()), c.tracing.Shutdown(ctx), c.metrics.Shutdown(ctx))
 	}
 }

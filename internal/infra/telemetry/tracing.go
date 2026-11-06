@@ -6,14 +6,11 @@ import (
 	"log/slog"
 	"math"
 	"net/url"
-	"runtime/debug"
 	"time"
 
 	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
-	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
@@ -30,15 +27,7 @@ func NewTracerProvider(ctx context.Context, cfg TracingConfig, logger *slog.Logg
 		return nil, err
 	}
 	otel.SetErrorHandler(otel.ErrorHandlerFunc(func(err error) { logger.Error("telemetry export failed", "error", err) }))
-	version := "dev"
-	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
-		version = info.Main.Version
-	}
-	res, err := resource.New(ctx,
-		resource.WithAttributes(attribute.String("service.name", "trip-service"), attribute.String("service.namespace", "tripgo"), attribute.String("deployment.environment", "local")),
-		resource.WithFromEnv(),
-		resource.WithAttributes(attribute.String("service.version", version)),
-	)
+	res, err := newResource(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create telemetry resource: %w", err)
 	}
