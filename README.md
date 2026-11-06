@@ -1,4 +1,4 @@
-# TripGO — HTTP API поездок
+# TripGO – HTTP API поездок
 
 Лабораторные работы 1 и 2: HTTP API, PostgreSQL, архитектура по слоям, тесты и observability.
 
@@ -80,7 +80,7 @@ make run
 | `GET` | `/health` | Проверить работу HTTP-сервера |
 | `GET` | `/ready` | Проверить доступность PostgreSQL |
 
-Ошибки возвращаются в формате `application/problem+json`: валидация — `400`, отсутствующая поездка — `404`, занятый водитель, повторное завершение и конфликт ключа — `409`. Внутренняя ошибка получает `500` без деталей ошибки в ответе.
+Ошибки возвращаются в формате `application/problem+json`: валидация – `400`, отсутствующая поездка – `404`, занятый водитель, повторное завершение и конфликт ключа – `409`. Внутренняя ошибка получает `500` без деталей ошибки в ответе.
 
 ## Архитектура
 
@@ -102,7 +102,7 @@ make run
 | `internal/infra/uuid` | Генерация идентификаторов |
 | `internal/generated` | Код, сгенерированный по OpenAPI |
 
-Интерфейсы объявлены у потребителей в `contract.go`: хендлер описывает нужный ему usecase, а usecase — методы репозиториев, менеджера транзакций и других зависимостей. Это позволяет заменять реализации и использовать моки. Зависимости передаются через конструкторы и связываются в `container.New`.
+Интерфейсы объявлены у потребителей в `contract.go`: хендлер описывает нужный ему usecase, а usecase – методы репозиториев, менеджера транзакций и других зависимостей. Это позволяет заменять реализации и использовать моки. Зависимости передаются через конструкторы и связываются в `container.New`.
 
 Домен не зависит от транспорта, драйвера БД и телеметрии. HTTP не обращается напрямую к репозиториям, usecase не использует `pgx` и не строит SQL. Правила импортов проверяет `depguard` в `.golangci.yml`.
 
@@ -161,15 +161,19 @@ Unit-тесты проверяют доменные правила, usecase с `
 go generate ./internal/usecase/... ./internal/http/...
 ```
 
+## Мутационное тестирование
+
+Дополнительное задание выполнено через Gremlins v0.6.0 для `internal/domain/...` и `internal/usecase/...`. Отчёты исходного и контрольного прогонов, разбор результатов и команды повторения находятся в [`docs/mutation/README.md`](docs/mutation/README.md).
+
 ## Observability
 
-Трейсы и метрики отправляются через OpenTelemetry SDK по OTLP в коллектор. Адрес и протокол задаются `OTEL_EXPORTER_OTLP_ENDPOINT` и `OTEL_EXPORTER_OTLP_PROTOCOL`. Отдельная ручка `/metrics` не требуется. Период экспорта метрик — 5 секунд.
+Трейсы и метрики отправляются через OpenTelemetry SDK по OTLP в коллектор. Адрес и протокол задаются `OTEL_EXPORTER_OTLP_ENDPOINT` и `OTEL_EXPORTER_OTLP_PROTOCOL`. Отдельная ручка `/metrics` не требуется. Период экспорта метрик – 5 секунд.
 
 В ресурс добавляются `service.name`, `service.version`, `service.namespace` и `deployment.environment`. Ссылки на Jaeger, Grafana и Prometheus выводит `tripgoctl connect`.
 
 ### Логи и трейсы
 
-Логи пишутся через `log/slog` в JSON в stdout. Для записей внутри спана добавляются `trace_id` и `span_id`. HTTP middleware пишет одну запись `request handled` с методом, шаблоном маршрута, статусом и длительностью. `2xx` и `4xx` имеют уровень `Info`, `5xx` — `Error`. Тела запросов и ответов не логируются.
+Логи пишутся через `log/slog` в JSON в stdout. Для записей внутри спана добавляются `trace_id` и `span_id`. HTTP middleware пишет одну запись `request handled` с методом, шаблоном маршрута, статусом и длительностью. `2xx` и `4xx` имеют уровень `Info`, `5xx` – `Error`. Тела запросов и ответов не логируются.
 
 Создание и завершение поездки логируются после коммита; повтор по ключу не создаёт второе событие создания. Логируются запуск и остановка сервиса, ошибки сохранения и восстановленные паники со стеком.
 
@@ -184,9 +188,9 @@ HTTP-спан называется по методу и шаблону марш�
 | `http.server.request.duration` | Histogram, секунды | `http.request.method`, `http.route`, `http.response.status_code` |
 | `http.server.active_requests` | Up-down counter | `http.request.method`, `http.route` |
 | `db.client.operation.duration` | Histogram, секунды | `db.operation.name`, `db.collection.name`, `error.type` при ошибке |
-| `tripgo.trips.created` | Counter | — |
-| `tripgo.trips.completed` | Counter | — |
-| `tripgo.trips.active` | Observable gauge | — |
+| `tripgo.trips.created` | Counter | – |
+| `tripgo.trips.completed` | Counter | – |
+| `tripgo.trips.active` | Observable gauge | – |
 
 `http.route` содержит шаблон, без конкретного UUID. Бизнес-счётчики увеличиваются после коммита, создание по повторному ключу не учитывается второй раз. Gauge получает количество активных поездок из БД при сборе, поэтому учитывает поездки, созданные до запуска сервиса.
 
@@ -216,7 +220,7 @@ tripgo_trips_completed_total
 tripgo_trips_active
 ```
 
-Суффиксы `_count`, `_bucket` и `_sum` относятся к histogram, `_total` — к counter в представлении Prometheus.
+Суффиксы `_count`, `_bucket` и `_sum` относятся к histogram, `_total` – к counter в представлении Prometheus.
 
 Для проверки выполните создание, получение и завершение поездки, найдите в Jaeger трейс с HTTP- и SQL-спанами и проверьте его поиск по `trace_id` из лога. После экспорта проверьте метрики в Grafana. Ошибки отправки телеметрии логируются и не останавливают обслуживание запросов; это проверяется отдельно при временной недоступности коллектора. Скриншоты Jaeger и Grafana прикладываются к PR.
 
@@ -243,4 +247,4 @@ docker run --rm \
   trip-service:lab2
 ```
 
-`30203` и `30206` — NodePort PostgreSQL и OTLP HTTP для лабораторной работы 2 в стандартном кластере `tripgo-local`. Реквизиты БД должны совпадать с выданными окружением. В контейнере используется имя узла вместо `localhost`; HTTP API доступен на хосте по `http://localhost:8080`. Команда использует bridge-сеть Docker и не требует `network host`.
+`30203` и `30206` – NodePort PostgreSQL и OTLP HTTP для лабораторной работы 2 в стандартном кластере `tripgo-local`. Реквизиты БД должны совпадать с выданными окружением. В контейнере используется имя узла вместо `localhost`; HTTP API доступен на хосте по `http://localhost:8080`. Команда использует bridge-сеть Docker и не требует `network host`.
