@@ -67,12 +67,17 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 			MinConns:        cfg.DatabaseMinConns,
 			MaxConnLifetime: cfg.DatabaseMaxConnLifetime,
 			ConnectTimeout:  cfg.DatabaseConnectTimeout,
-		}, tracing)
+		}, tracing, metrics)
 	if err != nil {
 		return nil, errors.Join(err, tracing.Shutdown(ctx), metrics.Shutdown(ctx))
 	}
 
 	tripRepo := triprepository.NewPgTripRepository(pool, cfg.DatabaseQueryTimeout)
+	tripMetrics, err := telemetry.NewTripMetrics(ctx, metrics.Meter("github.com/Pkhmv16/tripGO/internal/usecase/trip"), tripRepo)
+	if err != nil {
+		pool.Close()
+		return nil, errors.Join(err, tracing.Shutdown(ctx), metrics.Shutdown(ctx))
+	}
 
 	historyRepo := tripstatushistory.NewPgTripStatusChangeRepository(pool, cfg.DatabaseQueryTimeout)
 
@@ -82,9 +87,9 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	idempotencyRepo := tripidempotency.NewPgIdempotencyRepository(pool, cfg.DatabaseQueryTimeout, cfg.IdempotencyTTL)
 
 	tracer := tracing.Tracer("github.com/Pkhmv16/tripGO/internal/usecase/trip")
-	createUsecase := createusecase.New(tripRepo, historyRepo, idempotencyRepo, txManager, uuid.Generator{}, logger, tracer)
+	createUsecase := createusecase.New(tripRepo, historyRepo, idempotencyRepo, txManager, uuid.Generator{}, logger, tracer, tripMetrics.Created)
 	getUsecase := getusecase.New(tripRepo, tracer)
-	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager, logger, tracer)
+	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager, logger, tracer, tripMetrics.Completed)
 
 	createHandler := create.New(createUsecase, cfg.HTTPMaxBodyBytes)
 	getHandler := get.New(getUsecase)
@@ -140,6 +145,7 @@ func (c *Container) Shutdown(ctx context.Context) error {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("close HTTP: %w", closeErr))
 		}
 	}
+	shutdownErr = errors.Join(shutdownErr, c.metrics.Shutdown(ctx))
 	poolClosed := make(chan struct{})
 	go func() {
 		c.pool.Close()
@@ -147,12 +153,12 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-poolClosed:
-		shutdownErr = errors.Join(shutdownErr, c.tracing.Shutdown(ctx), c.metrics.Shutdown(ctx))
+		shutdownErr = errors.Join(shutdownErr, c.tracing.Shutdown(ctx))
 		if shutdownErr == nil {
 			c.logger.InfoContext(ctx, "service stopped")
 		}
 		return shutdownErr
 	case <-ctx.Done():
-		return errors.Join(shutdownErr, fmt.Errorf("close database pool: %w", ctx.Err()), c.tracing.Shutdown(ctx), c.metrics.Shutdown(ctx))
+		return errors.Join(shutdownErr, fmt.Errorf("close database pool: %w", ctx.Err()), c.tracing.Shutdown(ctx))
 	}
 }

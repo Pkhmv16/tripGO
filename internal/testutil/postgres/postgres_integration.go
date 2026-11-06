@@ -14,6 +14,7 @@ import (
 	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
 	postgrescontainer "github.com/testcontainers/testcontainers-go/modules/postgres"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	"go.opentelemetry.io/otel/trace/noop"
 
 	postgresinfra "github.com/Pkhmv16/tripGO/internal/infra/postgres"
@@ -45,7 +46,7 @@ func NewPool(t *testing.T) *pgxpool.Pool {
 	pool, err := postgresinfra.NewPostgresPool(ctx, postgresinfra.Config{
 		URL: dsn, MaxConns: 4, MinConns: 0,
 		MaxConnLifetime: time.Hour, ConnectTimeout: 5 * time.Second,
-	}, noop.NewTracerProvider())
+	}, noop.NewTracerProvider(), metricnoop.NewMeterProvider())
 	if err != nil {
 		t.Fatalf("connect to test PostgreSQL: %v", err)
 	}

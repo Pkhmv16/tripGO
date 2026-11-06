@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/codes"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -65,7 +66,7 @@ func TestUsecaseCreateTrip(t *testing.T) {
 			ids := NewMockidGenerator(ctrl)
 			log := NewMocklogger(ctrl)
 			tracer, recorder := newTestTracer(t)
-			uc := create.New(repo, history, keys, tx, ids, log, tracer)
+			uc := create.New(repo, history, keys, tx, ids, log, tracer, metricnoop.Int64Counter{})
 			ctx, parent := tracer.Start(context.Background(), "HTTP")
 			defer parent.End()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
@@ -185,7 +186,7 @@ func TestUsecaseCreateTripIdempotency(t *testing.T) {
 			tx := NewMocktxManager(ctrl)
 			ids := NewMockidGenerator(ctrl)
 			log := NewMocklogger(ctrl)
-			uc := create.New(repo, history, keys, tx, ids, log, noop.NewTracerProvider().Tracer("test"))
+			uc := create.New(repo, history, keys, tx, ids, log, noop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{})
 			ctx := context.Background()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
 			p := createParams()

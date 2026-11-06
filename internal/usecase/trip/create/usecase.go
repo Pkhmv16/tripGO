@@ -11,6 +11,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
@@ -18,6 +19,7 @@ import (
 )
 
 type Usecase struct {
+	createdCounter       metric.Int64Counter
 	tracer               trace.Tracer
 	logger               logger
 	tripRepo             tripRepository
@@ -27,8 +29,8 @@ type Usecase struct {
 	idGenerator          idGenerator
 }
 
-func New(repo tripRepository, history tripStatusChangeRepository, keys idempotencyRepository, tx txManager, ids idGenerator, log logger, tracer trace.Tracer) *Usecase {
-	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, idempotencyRepo: keys, txManager: tx, idGenerator: ids, logger: log, tracer: tracer}
+func New(repo tripRepository, history tripStatusChangeRepository, keys idempotencyRepository, tx txManager, ids idGenerator, log logger, tracer trace.Tracer, createdCounter metric.Int64Counter) *Usecase {
+	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, idempotencyRepo: keys, txManager: tx, idGenerator: ids, logger: log, tracer: tracer, createdCounter: createdCounter}
 }
 
 func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (result *domaintrip.Trip, created bool, err error) {
@@ -122,6 +124,7 @@ func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (re
 		return nil, false, err
 	}
 	if created {
+		uc.createdCounter.Add(ctx, 1)
 		uc.logger.InfoContext(ctx, "trip created", "trip_id", string(result.Id))
 	}
 	return result, created, nil

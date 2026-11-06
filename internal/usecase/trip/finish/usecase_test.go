@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/codes"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 	"go.opentelemetry.io/otel/trace"
@@ -50,7 +51,7 @@ func TestUsecaseFinishTrip(t *testing.T) {
 			tx := NewMocktxManager(ctrl)
 			log := NewMocklogger(ctrl)
 			tracer, recorder := newTestTracer(t)
-			uc := finish.New(repo, history, tx, log, tracer)
+			uc := finish.New(repo, history, tx, log, tracer, metricnoop.Int64Counter{})
 			ctx, parent := tracer.Start(context.Background(), "HTTP")
 			defer parent.End()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")

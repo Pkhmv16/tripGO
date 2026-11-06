@@ -8,12 +8,14 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
 )
 
 type Usecase struct {
+	completedCounter     metric.Int64Counter
 	tracer               trace.Tracer
 	logger               logger
 	tripRepo             tripRepository
@@ -21,8 +23,8 @@ type Usecase struct {
 	txManager            txManager
 }
 
-func New(repo tripRepository, history tripStatusChangeRepository, tx txManager, log logger, tracer trace.Tracer) *Usecase {
-	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, txManager: tx, logger: log, tracer: tracer}
+func New(repo tripRepository, history tripStatusChangeRepository, tx txManager, log logger, tracer trace.Tracer, completedCounter metric.Int64Counter) *Usecase {
+	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, txManager: tx, logger: log, tracer: tracer, completedCounter: completedCounter}
 }
 
 func (uc *Usecase) FinishTrip(ctx context.Context, tripId string) (result *domaintrip.Trip, err error) {
@@ -71,6 +73,7 @@ func (uc *Usecase) FinishTrip(ctx context.Context, tripId string) (result *domai
 		}
 		return nil, err
 	}
+	uc.completedCounter.Add(ctx, 1)
 	uc.logger.InfoContext(ctx, "trip completed", "trip_id", tripId)
 	return finalTrip, nil
 }
