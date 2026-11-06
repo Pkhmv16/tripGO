@@ -9,12 +9,15 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/Pkhmv16/tripGO/internal/config"
 	api "github.com/Pkhmv16/tripGO/internal/generated"
 	transport "github.com/Pkhmv16/tripGO/internal/http"
 	"github.com/Pkhmv16/tripGO/internal/http/domainerror"
+	"github.com/Pkhmv16/tripGO/internal/http/middleware"
 	"github.com/Pkhmv16/tripGO/internal/http/probe/health"
 	"github.com/Pkhmv16/tripGO/internal/http/probe/ready"
 	"github.com/Pkhmv16/tripGO/internal/http/trip/create"
@@ -33,9 +36,10 @@ import (
 )
 
 type Container struct {
-	server *http.Server
-	pool   *pgxpool.Pool
-	logger *slog.Logger
+	server  *http.Server
+	pool    *pgxpool.Pool
+	logger  *slog.Logger
+	tracing *sdktrace.TracerProvider
 }
 
 func New(ctx context.Context, cfg config.Config) (*Container, error) {
@@ -51,6 +55,14 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	tracing, err := telemetry.NewTracerProvider(ctx, telemetry.TracingConfig{Endpoint: cfg.OTelEndpoint, Protocol: cfg.OTelProtocol, Sampler: cfg.OTelSampler, Ratio: cfg.OTelSamplerRatio}, logger)
+	if err != nil {
+		pool.Close()
+		return nil, err
+	}
+	router := chi.NewRouter()
+	router.Use(middleware.Logging(logger))
 
 	tripRepo := triprepository.NewPgTripRepository(pool, cfg.DatabaseQueryTimeout)
 
@@ -71,19 +83,22 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	healthHandler := health.New()
 	readyHandler := ready.New(pool, cfg.DatabaseQueryTimeout)
 
+	api.HandlerWithOptions(&transport.Handler{
+		CreateHandler: createHandler,
+		GetHandler:    getHandler,
+		FinishHandler: finishHandler,
+		HealthHandler: healthHandler,
+		ReadyHandler:  readyHandler,
+	}, api.ChiServerOptions{
+		BaseRouter: router,
+		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			domainerror.WriteInvalidRequest(w, r, "Invalid request parameter")
+		},
+	})
+
 	server := &http.Server{
-		Addr: cfg.HTTPAddr,
-		Handler: api.HandlerWithOptions(&transport.Handler{
-			CreateHandler: createHandler,
-			GetHandler:    getHandler,
-			FinishHandler: finishHandler,
-			HealthHandler: healthHandler,
-			ReadyHandler:  readyHandler,
-		}, api.ChiServerOptions{
-			ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
-				domainerror.WriteInvalidRequest(w, r, "Invalid request parameter")
-			},
-		}),
+		Addr:              cfg.HTTPAddr,
+		Handler:           middleware.Recover(logger)(middleware.Tracing(tracing, router)),
 		ReadTimeout:       cfg.HTTPReadTimeout,
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTPWriteTimeout,
@@ -91,7 +106,7 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
-	return &Container{server: server, pool: pool, logger: logger}, nil
+	return &Container{server: server, pool: pool, logger: logger, tracing: tracing}, nil
 }
 
 func (c *Container) Run() error {
@@ -123,11 +138,12 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-poolClosed:
+		shutdownErr = errors.Join(shutdownErr, c.tracing.Shutdown(ctx))
 		if shutdownErr == nil {
 			c.logger.InfoContext(ctx, "service stopped")
 		}
 		return shutdownErr
 	case <-ctx.Done():
-		return errors.Join(shutdownErr, fmt.Errorf("close database pool: %w", ctx.Err()))
+		return errors.Join(shutdownErr, fmt.Errorf("close database pool: %w", ctx.Err()), c.tracing.Shutdown(ctx))
 	}
 }

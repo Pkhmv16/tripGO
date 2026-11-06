@@ -3,7 +3,9 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -11,6 +13,10 @@ import (
 )
 
 type Config struct {
+	OTelEndpoint          string
+	OTelProtocol          string
+	OTelSampler           string
+	OTelSamplerRatio      float64
 	HTTPAddr              string
 	HTTPReadTimeout       time.Duration
 	HTTPReadHeaderTimeout time.Duration
@@ -122,6 +128,9 @@ func LoadConfig() (Config, error) {
 		)
 	}
 
+	if err := cfg.loadTracing(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
 }
 
@@ -172,4 +181,28 @@ func readPositiveInt64(name string) (int64, error) {
 	}
 
 	return value, nil
+}
+
+func (cfg *Config) loadTracing() error {
+	cfg.OTelEndpoint = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	endpoint, err := url.Parse(cfg.OTelEndpoint)
+	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+		return fmt.Errorf("OTEL_EXPORTER_OTLP_ENDPOINT must be an HTTP or HTTPS URL")
+	}
+	cfg.OTelProtocol = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_PROTOCOL"))
+	if cfg.OTelProtocol != "grpc" && cfg.OTelProtocol != "http/protobuf" {
+		return fmt.Errorf("OTEL_EXPORTER_OTLP_PROTOCOL must be grpc or http/protobuf")
+	}
+	cfg.OTelSampler = strings.TrimSpace(os.Getenv("OTEL_TRACES_SAMPLER"))
+	if cfg.OTelSampler == "" {
+		cfg.OTelSampler = "parentbased_always_on"
+	}
+	cfg.OTelSamplerRatio = 1
+	if raw := strings.TrimSpace(os.Getenv("OTEL_TRACES_SAMPLER_ARG")); raw != "" {
+		cfg.OTelSamplerRatio, err = strconv.ParseFloat(raw, 64)
+		if err != nil || math.IsNaN(cfg.OTelSamplerRatio) || cfg.OTelSamplerRatio < 0 || cfg.OTelSamplerRatio > 1 {
+			return fmt.Errorf("OTEL_TRACES_SAMPLER_ARG must be between 0 and 1")
+		}
+	}
+	return nil
 }
