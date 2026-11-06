@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 )
 
 type Usecase struct {
+	logger               logger
 	tripRepo             tripRepository
 	tripStatusChangeRepo tripStatusChangeRepository
 	idempotencyRepo      idempotencyRepository
@@ -20,8 +22,8 @@ type Usecase struct {
 	idGenerator          idGenerator
 }
 
-func New(repo tripRepository, history tripStatusChangeRepository, keys idempotencyRepository, tx txManager, ids idGenerator) *Usecase {
-	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, idempotencyRepo: keys, txManager: tx, idGenerator: ids}
+func New(repo tripRepository, history tripStatusChangeRepository, keys idempotencyRepository, tx txManager, ids idGenerator, log logger) *Usecase {
+	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, idempotencyRepo: keys, txManager: tx, idGenerator: ids, logger: log}
 }
 
 func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (*domaintrip.Trip, bool, error) {
@@ -31,6 +33,7 @@ func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (*d
 		var err error
 		requestHash, err = createTripHash(p)
 		if err != nil {
+			uc.logger.ErrorContext(ctx, "trip creation failed", "error", err)
 			return nil, false, err
 		}
 	}
@@ -102,9 +105,14 @@ func (uc *Usecase) CreateTrip(ctx context.Context, p model.CreateTripParams) (*d
 		return nil
 	})
 	if err != nil {
+		if !errors.Is(err, domaintrip.ErrDriverBusy) && !errors.Is(err, domaintrip.ErrIdempotencyConflict) && !errors.Is(err, domaintrip.ErrTripNotFound) {
+			uc.logger.ErrorContext(ctx, "trip creation failed", "error", err)
+		}
 		return nil, false, err
 	}
-
+	if created {
+		uc.logger.InfoContext(ctx, "trip created", "trip_id", string(result.Id))
+	}
 	return result, created, nil
 }
 

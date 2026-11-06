@@ -22,3 +22,8 @@ type txManager interface {
 	Do(context.Context, func(context.Context) error) error
 }
 type idGenerator interface{ Generate() string }
+
+type logger interface {
+	InfoContext(context.Context, string, ...any)
+	ErrorContext(context.Context, string, ...any)
+}

@@ -145,3 +145,61 @@ func (mr *MocktxManagerMockRecorder) Do(arg0, arg1 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Do", reflect.TypeOf((*MocktxManager)(nil).Do), arg0, arg1)
 }
+
+// Mocklogger is a mock of logger interface.
+type Mocklogger struct {
+	ctrl     *gomock.Controller
+	recorder *MockloggerMockRecorder
+	isgomock struct{}
+}
+
+// MockloggerMockRecorder is the mock recorder for Mocklogger.
+type MockloggerMockRecorder struct {
+	mock *Mocklogger
+}
+
+// NewMocklogger creates a new mock instance.
+func NewMocklogger(ctrl *gomock.Controller) *Mocklogger {
+	mock := &Mocklogger{ctrl: ctrl}
+	mock.recorder = &MockloggerMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *Mocklogger) EXPECT() *MockloggerMockRecorder {
+	return m.recorder
+}
+
+// ErrorContext mocks base method.
+func (m *Mocklogger) ErrorContext(arg0 context.Context, arg1 string, arg2 ...any) {
+	m.ctrl.T.Helper()
+	varargs := []any{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	m.ctrl.Call(m, "ErrorContext", varargs...)
+}
+
+// ErrorContext indicates an expected call of ErrorContext.
+func (mr *MockloggerMockRecorder) ErrorContext(arg0, arg1 any, arg2 ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{arg0, arg1}, arg2...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ErrorContext", reflect.TypeOf((*Mocklogger)(nil).ErrorContext), varargs...)
+}
+
+// InfoContext mocks base method.
+func (m *Mocklogger) InfoContext(arg0 context.Context, arg1 string, arg2 ...any) {
+	m.ctrl.T.Helper()
+	varargs := []any{arg0, arg1}
+	for _, a := range arg2 {
+		varargs = append(varargs, a)
+	}
+	m.ctrl.Call(m, "InfoContext", varargs...)
+}
+
+// InfoContext indicates an expected call of InfoContext.
+func (mr *MockloggerMockRecorder) InfoContext(arg0, arg1 any, arg2 ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{arg0, arg1}, arg2...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "InfoContext", reflect.TypeOf((*Mocklogger)(nil).InfoContext), varargs...)
+}

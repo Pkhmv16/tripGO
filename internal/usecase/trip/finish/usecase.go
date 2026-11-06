@@ -2,19 +2,21 @@ package finish
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	domaintrip "github.com/Pkhmv16/tripGO/internal/domain/trip"
 )
 
 type Usecase struct {
+	logger               logger
 	tripRepo             tripRepository
 	tripStatusChangeRepo tripStatusChangeRepository
 	txManager            txManager
 }
 
-func New(repo tripRepository, history tripStatusChangeRepository, tx txManager) *Usecase {
-	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, txManager: tx}
+func New(repo tripRepository, history tripStatusChangeRepository, tx txManager, log logger) *Usecase {
+	return &Usecase{tripRepo: repo, tripStatusChangeRepo: history, txManager: tx, logger: log}
 }
 
 func (uc *Usecase) FinishTrip(ctx context.Context, tripId string) (*domaintrip.Trip, error) {
@@ -49,8 +51,11 @@ func (uc *Usecase) FinishTrip(ctx context.Context, tripId string) (*domaintrip.T
 		return uc.tripStatusChangeRepo.Save(ctx, tripStatusChange)
 	})
 	if err != nil {
+		if !errors.Is(err, domaintrip.ErrTripNotFound) && !errors.Is(err, domaintrip.ErrTripAlreadyCompleted) {
+			uc.logger.ErrorContext(ctx, "trip completion failed", "trip_id", tripId, "error", err)
+		}
 		return nil, err
 	}
-
+	uc.logger.InfoContext(ctx, "trip completed", "trip_id", tripId)
 	return finalTrip, nil
 }

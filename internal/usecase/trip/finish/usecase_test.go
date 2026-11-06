@@ -44,9 +44,12 @@ func TestUsecaseFinishTrip(t *testing.T) {
 			repo := NewMocktripRepository(ctrl)
 			history := NewMocktripStatusChangeRepository(ctrl)
 			tx := NewMocktxManager(ctrl)
-			uc := finish.New(repo, history, tx)
+			log := NewMocklogger(ctrl)
+			uc := finish.New(repo, history, tx, log)
 			ctx := context.Background()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
+			txCompleted := false
+			expectCompletionLog(t, log, ctx, tt.wantErr, dependencyErr, &txCompleted)
 			startedAt := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
 			original := &domaintrip.Trip{
 				Id: "trip-id", UserId: "user-id", DriverId: "driver-id",
@@ -63,6 +66,7 @@ func TestUsecaseFinishTrip(t *testing.T) {
 			} else {
 				tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
 					err := fn(txCtx)
+					txCompleted = true
 					if tt.failAt == "commit" {
 						if err != nil {
 							t.Fatalf("callback error: %v", err)
@@ -139,5 +143,18 @@ func TestUsecaseFinishTrip(t *testing.T) {
 				t.Errorf("finished_at = %v is outside the operation interval", got.FinishedAt)
 			}
 		})
+	}
+}
+
+func expectCompletionLog(t *testing.T, log *Mocklogger, ctx context.Context, wantErr, dependencyErr error, txCompleted *bool) {
+	t.Helper()
+	if wantErr == nil {
+		log.EXPECT().InfoContext(ctx, "trip completed", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
+			if !*txCompleted {
+				t.Error("success was logged before transaction completed")
+			}
+		})
+	} else if errors.Is(wantErr, dependencyErr) {
+		log.EXPECT().ErrorContext(ctx, "trip completion failed", "trip_id", "trip-id", "error", wantErr)
 	}
 }

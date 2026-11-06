@@ -73,9 +73,9 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 
 	idempotencyRepo := tripidempotency.NewPgIdempotencyRepository(pool, cfg.DatabaseQueryTimeout, cfg.IdempotencyTTL)
 
-	createUsecase := createusecase.New(tripRepo, historyRepo, idempotencyRepo, txManager, uuid.Generator{})
+	createUsecase := createusecase.New(tripRepo, historyRepo, idempotencyRepo, txManager, uuid.Generator{}, logger)
 	getUsecase := getusecase.New(tripRepo)
-	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager)
+	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager, logger)
 
 	createHandler := create.New(createUsecase, cfg.HTTPMaxBodyBytes)
 	getHandler := get.New(getUsecase)

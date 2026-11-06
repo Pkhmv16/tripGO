@@ -58,9 +58,12 @@ func TestUsecaseCreateTrip(t *testing.T) {
 			keys := NewMockidempotencyRepository(ctrl)
 			tx := NewMocktxManager(ctrl)
 			ids := NewMockidGenerator(ctrl)
-			uc := create.New(repo, history, keys, tx, ids)
+			log := NewMocklogger(ctrl)
+			uc := create.New(repo, history, keys, tx, ids, log)
 			ctx := context.Background()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
+			txCompleted := false
+			expectCreationLog(t, log, ctx, tt.wantErr, dependencyErr, &txCompleted)
 			p := createParams()
 			key := "7f1c2a54-6d0e-4a3b-9f21-0c8e5b3a77d1"
 			if tt.withKey {
@@ -71,6 +74,7 @@ func TestUsecaseCreateTrip(t *testing.T) {
 			} else {
 				tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
 					err := fn(txCtx)
+					txCompleted = true
 					if tt.failAt == "commit" {
 						if err != nil {
 							t.Fatalf("callback error: %v", err)
@@ -172,12 +176,14 @@ func TestUsecaseCreateTripIdempotency(t *testing.T) {
 			keys := NewMockidempotencyRepository(ctrl)
 			tx := NewMocktxManager(ctrl)
 			ids := NewMockidGenerator(ctrl)
-			uc := create.New(repo, history, keys, tx, ids)
+			log := NewMocklogger(ctrl)
+			uc := create.New(repo, history, keys, tx, ids, log)
 			ctx := context.Background()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
 			p := createParams()
 			p.StartLatitude = 0
 			p.IdempotencyKey = new("7f1c2a54-6d0e-4a3b-9f21-0c8e5b3a77d1")
+			log.EXPECT().InfoContext(ctx, "trip created", "trip_id", "trip-id")
 			tx.EXPECT().Do(ctx, gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error { return fn(txCtx) }).Times(2)
 			var savedHash []byte
 			gomock.InOrder(
@@ -202,6 +208,9 @@ func TestUsecaseCreateTripIdempotency(t *testing.T) {
 			record := &domaintrip.IdempotencyRecord{RequestHash: savedHash, TripId: original.Id}
 			lookup := keys.EXPECT().FindForCreate(txCtx, *p.IdempotencyKey).Return(record, nil)
 			wantErr := tt.getErr
+			if tt.getErr != nil {
+				log.EXPECT().ErrorContext(ctx, "trip creation failed", "error", tt.getErr)
+			}
 			if tt.conflict {
 				wantErr = domaintrip.ErrIdempotencyConflict
 			} else {
@@ -243,5 +252,18 @@ func assertCreatedTrip(t *testing.T, got *domaintrip.Trip, p model.CreateTripPar
 	}
 	if got.StartedAt.IsZero() {
 		t.Error("start time is zero")
+	}
+}
+
+func expectCreationLog(t *testing.T, log *Mocklogger, ctx context.Context, wantErr, dependencyErr error, txCompleted *bool) {
+	t.Helper()
+	if wantErr == nil {
+		log.EXPECT().InfoContext(ctx, "trip created", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
+			if !*txCompleted {
+				t.Error("success was logged before transaction completed")
+			}
+		})
+	} else if errors.Is(wantErr, dependencyErr) {
+		log.EXPECT().ErrorContext(ctx, "trip creation failed", "error", wantErr)
 	}
 }
