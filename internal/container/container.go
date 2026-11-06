@@ -4,7 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net"
 	"net/http"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -19,6 +22,7 @@ import (
 	"github.com/Pkhmv16/tripGO/internal/http/trip/get"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres/transaction"
+	"github.com/Pkhmv16/tripGO/internal/infra/telemetry"
 	"github.com/Pkhmv16/tripGO/internal/infra/uuid"
 	triprepository "github.com/Pkhmv16/tripGO/internal/repository/postgres/trip"
 	tripidempotency "github.com/Pkhmv16/tripGO/internal/repository/postgres/tripidempotency"
@@ -31,9 +35,11 @@ import (
 type Container struct {
 	server *http.Server
 	pool   *pgxpool.Pool
+	logger *slog.Logger
 }
 
 func New(ctx context.Context, cfg config.Config) (*Container, error) {
+	logger := telemetry.NewLogger(os.Stdout, cfg.LogLevel)
 	pool, err := postgres.NewPostgresPool(ctx,
 		postgres.Config{
 			URL:             cfg.DatabaseURL,
@@ -82,13 +88,19 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTPWriteTimeout,
 		IdleTimeout:       cfg.HTTPIdleTimeout,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
-	return &Container{server: server, pool: pool}, nil
+	return &Container{server: server, pool: pool, logger: logger}, nil
 }
 
 func (c *Container) Run() error {
-	err := c.server.ListenAndServe()
+	listener, err := net.Listen("tcp", c.server.Addr)
+	if err != nil {
+		return fmt.Errorf("listen HTTP: %w", err)
+	}
+	c.logger.Info("service started", "address", listener.Addr().String())
+	err = c.server.Serve(listener)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve HTTP: %w", err)
 	}
@@ -96,6 +108,7 @@ func (c *Container) Run() error {
 }
 
 func (c *Container) Shutdown(ctx context.Context) error {
+	c.logger.InfoContext(ctx, "service stopping")
 	var shutdownErr error
 	if err := c.server.Shutdown(ctx); err != nil {
 		shutdownErr = fmt.Errorf("shutdown HTTP: %w", err)
@@ -110,6 +123,9 @@ func (c *Container) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-poolClosed:
+		if shutdownErr == nil {
+			c.logger.InfoContext(ctx, "service stopped")
+		}
 		return shutdownErr
 	case <-ctx.Done():
 		return errors.Join(shutdownErr, fmt.Errorf("close database pool: %w", ctx.Err()))

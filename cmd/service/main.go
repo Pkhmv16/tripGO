@@ -4,18 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/Pkhmv16/tripGO/internal/config"
 	"github.com/Pkhmv16/tripGO/internal/container"
+	"github.com/Pkhmv16/tripGO/internal/infra/telemetry"
 )
 
 func main() {
 	if err := run(); err != nil {
-		log.Print(err)
+		logger := telemetry.NewLogger(os.Stdout, slog.LevelError)
+		logger.Error("service failed", "error", err)
 		os.Exit(1)
 	}
 }
