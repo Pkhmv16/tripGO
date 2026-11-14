@@ -24,11 +24,7 @@ import (
 
 type transactionContextKey struct{}
 
-const (
-	failureCreate  = "create"
-	failureHistory = "history"
-	failureLookup  = "lookup"
-)
+const testKey = "7f1c2a54-6d0e-4a3b-9f21-0c8e5b3a77d1"
 
 func createParams() model.CreateTripParams {
 	return model.CreateTripParams{
@@ -38,108 +34,143 @@ func createParams() model.CreateTripParams {
 	}
 }
 
+type fixture struct {
+	t           *testing.T
+	repo        *MocktripRepository
+	history     *MocktripStatusChangeRepository
+	keys        *MockidempotencyRepository
+	tx          *MocktxManager
+	ids         *MockidGenerator
+	log         *Mocklogger
+	txCtx       context.Context
+	params      model.CreateTripParams
+	stored      *domaintrip.Trip
+	txCompleted bool
+}
+
+func (f *fixture) transaction(wantCallbackErr, result error) {
+	f.tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
+		err := fn(f.txCtx)
+		if !errors.Is(err, wantCallbackErr) {
+			f.t.Fatalf("callback error = %v, want %v", err, wantCallbackErr)
+		}
+		f.txCompleted = true
+		return result
+	})
+}
+
+func (f *fixture) insertTrip(result error) *gomock.Call {
+	return f.repo.EXPECT().Create(f.txCtx, gomock.Any()).DoAndReturn(func(_ context.Context, got *domaintrip.Trip) error {
+		assertCreatedTrip(f.t, got, f.params)
+		f.stored = got
+		return result
+	})
+}
+
+func (f *fixture) saveHistory(result error) *gomock.Call {
+	return f.history.EXPECT().Save(f.txCtx, gomock.Any()).DoAndReturn(func(_ context.Context, change *domaintrip.TripStatusChange) error {
+		if change.TripId != f.stored.Id || change.FromStatus != nil || change.ToStatus != domaintrip.StatusActive || !change.ChangedAt.Equal(f.stored.StartedAt) {
+			f.t.Errorf("initial history = %+v", change)
+		}
+		return result
+	})
+}
+
+func (f *fixture) saveKey(result error) *gomock.Call {
+	return f.keys.EXPECT().Save(f.txCtx, testKey, gomock.Any(), domaintrip.TripId("trip-id")).DoAndReturn(func(_ context.Context, _ string, hash []byte, _ domaintrip.TripId) error {
+		if len(hash) != 32 {
+			f.t.Errorf("request hash length = %d", len(hash))
+		}
+		return result
+	})
+}
+
+func (f *fixture) logSuccess() {
+	f.log.EXPECT().InfoContext(gomock.Any(), "trip created", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
+		if !f.txCompleted {
+			f.t.Error("success was logged before transaction completed")
+		}
+	})
+}
+
+func (f *fixture) logFailure(err error) {
+	f.log.EXPECT().ErrorContext(gomock.Any(), "trip creation failed", "error", err)
+}
+
 func TestUsecaseCreateTrip(t *testing.T) {
 	dependencyErr := errors.New("dependency failure")
+	withoutKey := createParams()
+	withKey := withoutKey
+	withKey.IdempotencyKey = new(testKey)
 	tests := []struct {
 		name    string
-		withKey bool
-		failAt  string
+		params  model.CreateTripParams
+		setup   func(*fixture)
 		wantErr error
 	}{
-		{name: "success without key"},
-		{name: "success with key", withKey: true},
-		{name: "driver busy", failAt: failureCreate, wantErr: domaintrip.ErrDriverBusy},
-		{name: "create error", failAt: failureCreate, wantErr: dependencyErr},
-		{name: "history error", withKey: true, failAt: failureHistory, wantErr: dependencyErr},
-		{name: "key lookup error", withKey: true, failAt: failureLookup, wantErr: dependencyErr},
-		{name: "key save error", withKey: true, failAt: "key", wantErr: dependencyErr},
-		{name: "transaction begin error", withKey: true, failAt: "begin", wantErr: dependencyErr},
-		{name: "transaction commit error", withKey: true, failAt: "commit", wantErr: dependencyErr},
+		{name: "success without key", params: withoutKey, setup: func(f *fixture) {
+			f.transaction(nil, nil)
+			gomock.InOrder(f.ids.EXPECT().Generate().Return("trip-id"), f.insertTrip(nil), f.saveHistory(nil))
+			f.logSuccess()
+		}},
+		{name: "success with key", params: withKey, setup: func(f *fixture) {
+			f.transaction(nil, nil)
+			gomock.InOrder(f.keys.EXPECT().FindForCreate(f.txCtx, testKey).Return(nil, nil),
+				f.ids.EXPECT().Generate().Return("trip-id"), f.insertTrip(nil), f.saveHistory(nil), f.saveKey(nil))
+			f.logSuccess()
+		}},
+		{name: "driver busy", params: withoutKey, wantErr: domaintrip.ErrDriverBusy, setup: func(f *fixture) {
+			f.transaction(domaintrip.ErrDriverBusy, domaintrip.ErrDriverBusy)
+			gomock.InOrder(f.ids.EXPECT().Generate().Return("trip-id"), f.insertTrip(domaintrip.ErrDriverBusy))
+		}},
+		{name: "create error", params: withoutKey, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(dependencyErr, dependencyErr)
+			gomock.InOrder(f.ids.EXPECT().Generate().Return("trip-id"), f.insertTrip(dependencyErr))
+			f.logFailure(dependencyErr)
+		}},
+		{name: "history error", params: withKey, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(dependencyErr, dependencyErr)
+			gomock.InOrder(f.keys.EXPECT().FindForCreate(f.txCtx, testKey).Return(nil, nil),
+				f.ids.EXPECT().Generate().Return("trip-id"), f.insertTrip(nil), f.saveHistory(dependencyErr))
+			f.logFailure(dependencyErr)
+		}},
+		{name: "key lookup error", params: withKey, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(dependencyErr, dependencyErr)
+			f.keys.EXPECT().FindForCreate(f.txCtx, testKey).Return(nil, dependencyErr)
+			f.logFailure(dependencyErr)
+		}},
+		{name: "key save error", params: withKey, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(dependencyErr, dependencyErr)
+			gomock.InOrder(f.keys.EXPECT().FindForCreate(f.txCtx, testKey).Return(nil, nil),
+				f.ids.EXPECT().Generate().Return("trip-id"), f.insertTrip(nil), f.saveHistory(nil), f.saveKey(dependencyErr))
+			f.logFailure(dependencyErr)
+		}},
+		{name: "transaction begin error", params: withKey, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.tx.EXPECT().Do(gomock.Any(), gomock.Any()).Return(dependencyErr)
+			f.logFailure(dependencyErr)
+		}},
+		{name: "transaction commit error", params: withKey, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(nil, dependencyErr)
+			gomock.InOrder(f.keys.EXPECT().FindForCreate(f.txCtx, testKey).Return(nil, nil),
+				f.ids.EXPECT().Generate().Return("trip-id"), f.insertTrip(nil), f.saveHistory(nil), f.saveKey(nil))
+			f.logFailure(dependencyErr)
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			repo := NewMocktripRepository(ctrl)
-			history := NewMocktripStatusChangeRepository(ctrl)
-			keys := NewMockidempotencyRepository(ctrl)
-			tx := NewMocktxManager(ctrl)
-			ids := NewMockidGenerator(ctrl)
-			log := NewMocklogger(ctrl)
 			tracer, recorder := newTestTracer(t)
-			uc := create.New(repo, history, keys, tx, ids, log, tracer, metricnoop.Int64Counter{})
 			ctx, parent := tracer.Start(context.Background(), "HTTP")
 			defer parent.End()
-			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
-			txCompleted := false
-			expectCreationLog(t, log, tt.wantErr, dependencyErr, &txCompleted)
-			p := createParams()
-			key := "7f1c2a54-6d0e-4a3b-9f21-0c8e5b3a77d1"
-			if tt.withKey {
-				p.IdempotencyKey = &key
+			f := &fixture{
+				t: t, repo: NewMocktripRepository(ctrl), history: NewMocktripStatusChangeRepository(ctrl),
+				keys: NewMockidempotencyRepository(ctrl), tx: NewMocktxManager(ctrl), ids: NewMockidGenerator(ctrl),
+				log: NewMocklogger(ctrl), txCtx: context.WithValue(ctx, transactionContextKey{}, "transaction"), params: tt.params,
 			}
-			if tt.failAt == "begin" {
-				tx.EXPECT().Do(gomock.Any(), gomock.Any()).Return(tt.wantErr)
-			} else {
-				tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
-					err := fn(txCtx)
-					txCompleted = true
-					if tt.failAt == "commit" {
-						if err != nil {
-							t.Fatalf("callback error: %v", err)
-						}
-						return tt.wantErr
-					}
-					if !errors.Is(err, tt.wantErr) {
-						t.Errorf("callback error = %v, want %v", err, tt.wantErr)
-					}
-					return err
-				})
-				var calls []any
-				if tt.withKey {
-					var lookupErr error
-					if tt.failAt == failureLookup {
-						lookupErr = tt.wantErr
-					}
-					calls = append(calls, keys.EXPECT().FindForCreate(txCtx, key).Return(nil, lookupErr))
-				}
-				if tt.failAt != failureLookup {
-					calls = append(calls, ids.EXPECT().Generate().Return("trip-id"))
-					var stored *domaintrip.Trip
-					calls = append(calls, repo.EXPECT().Create(txCtx, gomock.Any()).DoAndReturn(func(_ context.Context, got *domaintrip.Trip) error {
-						assertCreatedTrip(t, got, p)
-						stored = got
-						if tt.failAt == failureCreate {
-							return tt.wantErr
-						}
-						return nil
-					}))
-					if tt.failAt != failureCreate {
-						calls = append(calls, history.EXPECT().Save(txCtx, gomock.Any()).DoAndReturn(func(_ context.Context, change *domaintrip.TripStatusChange) error {
-							if change.TripId != stored.Id || change.FromStatus != nil || change.ToStatus != domaintrip.StatusActive || !change.ChangedAt.Equal(stored.StartedAt) {
-								t.Errorf("initial history = %+v", change)
-							}
-							if tt.failAt == failureHistory {
-								return tt.wantErr
-							}
-							return nil
-						}))
-						if tt.withKey && tt.failAt != failureHistory {
-							calls = append(calls, keys.EXPECT().Save(txCtx, key, gomock.Any(), domaintrip.TripId("trip-id")).DoAndReturn(func(_ context.Context, _ string, hash []byte, _ domaintrip.TripId) error {
-								if len(hash) != 32 {
-									t.Errorf("request hash length = %d", len(hash))
-								}
-								if tt.failAt == "key" {
-									return tt.wantErr
-								}
-								return nil
-							}))
-						}
-					}
-				}
-				gomock.InOrder(calls...)
-			}
+			tt.setup(f)
+			uc := create.New(f.repo, f.history, f.keys, f.tx, f.ids, f.log, tracer, metricnoop.Int64Counter{})
 			before := time.Now()
-			got, created, err := uc.CreateTrip(ctx, p)
+			got, created, err := uc.CreateTrip(ctx, tt.params)
 			assertUsecaseSpan(t, recorder, parent, tt.wantErr)
 			after := time.Now()
 			if !errors.Is(err, tt.wantErr) {
@@ -163,19 +194,34 @@ func TestUsecaseCreateTrip(t *testing.T) {
 
 func TestUsecaseCreateTripIdempotency(t *testing.T) {
 	dependencyErr := errors.New("get saved trip failed")
+	initial := createParams()
+	initial.StartLatitude = 0
+	initial.IdempotencyKey = new(testKey)
+	replay := func(change func(*model.CreateTripParams)) model.CreateTripParams {
+		p := initial
+		change(&p)
+		return p
+	}
+	readTrip := func(f *fixture, lookup *gomock.Call) {
+		f.repo.EXPECT().Get(f.txCtx, f.stored.Id).Return(f.stored, nil).After(lookup)
+	}
+	skipRead := func(*fixture, *gomock.Call) {}
 	tests := []struct {
-		name     string
-		change   func(*model.CreateTripParams)
-		getErr   error
-		conflict bool
+		name    string
+		params  model.CreateTripParams
+		setup   func(*fixture, *gomock.Call)
+		wantErr error
 	}{
-		{name: "same parameters"},
-		{name: "same parameters with another key", change: func(p *model.CreateTripParams) { p.IdempotencyKey = new("87925466-6354-4ae0-b084-c41263216ea7") }},
-		{name: "equivalent negative zero", change: func(p *model.CreateTripParams) { p.StartLatitude = math.Copysign(0, -1) }},
-		{name: "changed price", change: func(p *model.CreateTripParams) { p.Price++ }, conflict: true},
-		{name: "changed driver", change: func(p *model.CreateTripParams) { p.DriverId = "another-driver" }, conflict: true},
-		{name: "changed coordinates", change: func(p *model.CreateTripParams) { p.EndLongitude++ }, conflict: true},
-		{name: "saved trip read error", getErr: dependencyErr},
+		{name: "same parameters", params: initial, setup: readTrip},
+		{name: "same parameters with another key", params: replay(func(p *model.CreateTripParams) { p.IdempotencyKey = new("87925466-6354-4ae0-b084-c41263216ea7") }), setup: readTrip},
+		{name: "equivalent negative zero", params: replay(func(p *model.CreateTripParams) { p.StartLatitude = math.Copysign(0, -1) }), setup: readTrip},
+		{name: "changed price", params: replay(func(p *model.CreateTripParams) { p.Price++ }), setup: skipRead, wantErr: domaintrip.ErrIdempotencyConflict},
+		{name: "changed driver", params: replay(func(p *model.CreateTripParams) { p.DriverId = "another-driver" }), setup: skipRead, wantErr: domaintrip.ErrIdempotencyConflict},
+		{name: "changed coordinates", params: replay(func(p *model.CreateTripParams) { p.EndLongitude++ }), setup: skipRead, wantErr: domaintrip.ErrIdempotencyConflict},
+		{name: "saved trip read error", params: initial, wantErr: dependencyErr, setup: func(f *fixture, lookup *gomock.Call) {
+			f.repo.EXPECT().Get(f.txCtx, f.stored.Id).Return(nil, dependencyErr).After(lookup)
+			f.logFailure(dependencyErr)
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -189,9 +235,7 @@ func TestUsecaseCreateTripIdempotency(t *testing.T) {
 			uc := create.New(repo, history, keys, tx, ids, log, noop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{})
 			ctx := context.Background()
 			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
-			p := createParams()
-			p.StartLatitude = 0
-			p.IdempotencyKey = new("7f1c2a54-6d0e-4a3b-9f21-0c8e5b3a77d1")
+			p := initial
 			log.EXPECT().InfoContext(gomock.Any(), "trip created", "trip_id", "trip-id")
 			tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error { return fn(txCtx) }).Times(2)
 			var savedHash []byte
@@ -209,23 +253,13 @@ func TestUsecaseCreateTripIdempotency(t *testing.T) {
 			if err != nil || !created || original == nil {
 				t.Fatalf("initial creation: trip=%+v created=%v err=%v", original, created, err)
 			}
-			if tt.change != nil {
-				tt.change(&p)
-			}
 			original.Status = domaintrip.StatusCompleted
 			original.FinishedAt = new(original.StartedAt.Add(time.Hour))
 			record := &domaintrip.IdempotencyRecord{RequestHash: savedHash, TripId: original.Id}
-			lookup := keys.EXPECT().FindForCreate(txCtx, *p.IdempotencyKey).Return(record, nil)
-			wantErr := tt.getErr
-			if tt.getErr != nil {
-				log.EXPECT().ErrorContext(gomock.Any(), "trip creation failed", "error", tt.getErr)
-			}
-			if tt.conflict {
-				wantErr = domaintrip.ErrIdempotencyConflict
-			} else {
-				repo.EXPECT().Get(txCtx, original.Id).Return(original, tt.getErr).After(lookup)
-			}
-			got, isNew, err := uc.CreateTrip(ctx, p)
+			lookup := keys.EXPECT().FindForCreate(txCtx, *tt.params.IdempotencyKey).Return(record, nil)
+			tt.setup(&fixture{repo: repo, log: log, txCtx: txCtx, stored: original}, lookup)
+			wantErr := tt.wantErr
+			got, isNew, err := uc.CreateTrip(ctx, tt.params)
 			if !errors.Is(err, wantErr) {
 				t.Fatalf("replay error = %v, want %v", err, wantErr)
 			}
@@ -261,19 +295,6 @@ func assertCreatedTrip(t *testing.T, got *domaintrip.Trip, p model.CreateTripPar
 	}
 	if got.StartedAt.IsZero() {
 		t.Error("start time is zero")
-	}
-}
-
-func expectCreationLog(t *testing.T, log *Mocklogger, wantErr, dependencyErr error, txCompleted *bool) {
-	t.Helper()
-	if wantErr == nil {
-		log.EXPECT().InfoContext(gomock.Any(), "trip created", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
-			if !*txCompleted {
-				t.Error("success was logged before transaction completed")
-			}
-		})
-	} else if errors.Is(wantErr, dependencyErr) {
-		log.EXPECT().ErrorContext(gomock.Any(), "trip creation failed", "error", wantErr)
 	}
 }
 

@@ -18,26 +18,26 @@ import (
 type requestKey struct{}
 
 func TestHandlerReady(t *testing.T) {
+	keepOpen := func(context.CancelFunc) {}
 	tests := []struct {
 		name       string
 		err        error
-		cancelled  bool
+		prepare    func(context.CancelFunc)
 		wantStatus int
 		wantHealth api.HealthResponseStatus
 	}{
-		{name: "database available", wantStatus: 200, wantHealth: api.Ok},
-		{name: "database unavailable", err: errors.New("private database details"), wantStatus: 503, wantHealth: api.Unavailable},
-		{name: "database timeout", err: context.DeadlineExceeded, wantStatus: 503, wantHealth: api.Unavailable},
-		{name: "request cancelled", err: context.Canceled, cancelled: true, wantStatus: 503, wantHealth: api.Unavailable},
+		{name: "database available", prepare: keepOpen, wantStatus: 200, wantHealth: api.Ok},
+		{name: "database unavailable", err: errors.New("private database details"), prepare: keepOpen, wantStatus: 503, wantHealth: api.Unavailable},
+		{name: "database timeout", err: context.DeadlineExceeded, prepare: keepOpen, wantStatus: 503, wantHealth: api.Unavailable},
+		{name: "request cancelled", err: context.Canceled, prepare: func(cancel context.CancelFunc) { cancel() }, wantStatus: 503, wantHealth: api.Unavailable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			checker := NewMockreadinessChecker(gomock.NewController(t))
 			requestCtx, cancel := context.WithCancel(context.WithValue(context.Background(), requestKey{}, "request-value"))
 			defer cancel()
-			if tt.cancelled {
-				cancel()
-			}
+			tt.prepare(cancel)
+			wantContextErr := requestCtx.Err()
 			timeout := time.Second
 			var pingCtx context.Context
 			before := time.Now()
@@ -53,7 +53,7 @@ func TestHandlerReady(t *testing.T) {
 				if deadline.Before(before.Add(timeout)) || deadline.After(time.Now().Add(timeout)) {
 					t.Errorf("unexpected deadline: %v", deadline)
 				}
-				if tt.cancelled && !errors.Is(ctx.Err(), context.Canceled) {
+				if !errors.Is(ctx.Err(), wantContextErr) {
 					t.Errorf("context error=%v", ctx.Err())
 				}
 				return tt.err

@@ -33,19 +33,11 @@ func TestNewTripStatusChange(t *testing.T) {
 				t.Fatalf("NewTripStatusChange() = %+v, want %+v", got, want)
 			}
 
-			if tt.fromStatus != nil {
-				original := *tt.fromStatus
-				*tt.fromStatus = trip.TripStatus("changed")
-				if *got.FromStatus != original {
-					t.Error("changing the source status changed the history record")
-				}
+			if got.FromStatus != nil && got.FromStatus == tt.fromStatus {
+				t.Error("history record shares the source status pointer")
 			}
-			if tt.reason != nil {
-				original := *tt.reason
-				*tt.reason = "changed"
-				if *got.Reason != original {
-					t.Error("changing the source reason changed the history record")
-				}
+			if got.Reason != nil && got.Reason == tt.reason {
+				t.Error("history record shares the source reason pointer")
 			}
 		})
 	}

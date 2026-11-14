@@ -38,54 +38,49 @@ func TestHandlerGetTrip(t *testing.T) {
 	id := uuid.MustParse("1f0a9c62-4a1c-4f2e-9d33-2a4bb0f0b111")
 	userID := uuid.MustParse("5cb72c04-7650-45c9-a79b-bcdba0631e0c")
 	driverID := uuid.MustParse("8860b315-ec86-42eb-a17c-7c163d721ff5")
-	tests := []struct {
-		name          string
-		err           error
-		invalidID     string
-		invalidResult string
-		wantStatus    int32
-		wantCode      string
-	}{
-		{name: "success", wantStatus: 200},
-		{name: "not found", err: domaintrip.ErrTripNotFound, wantStatus: 404, wantCode: "trip_not_found"},
+	started := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	result := domaintrip.NewTrip(domaintrip.TripId(id.String()), domaintrip.UserId(userID.String()), domaintrip.DriverId(driverID.String()), 59.9398, 30.3146, 59.929, 30.3626, 1450, started)
 
-		{name: "internal error", err: errors.New("private SQL details password=secret"), wantStatus: 500, wantCode: internalErrorCode},
-		{name: "invalid request id", invalidID: "not-a-uuid", wantStatus: 400, wantCode: "invalid_request"},
-		{name: "invalid returned trip id", invalidResult: "trip", wantStatus: 500, wantCode: internalErrorCode},
-		{name: "invalid returned user id", invalidResult: "user", wantStatus: 500, wantCode: internalErrorCode},
-		{name: "invalid returned driver id", invalidResult: "driver", wantStatus: 500, wantCode: internalErrorCode},
+	want := api.Trip{Id: id, UserId: userID, DriverId: driverID, StartPoint: api.Coordinates{Latitude: 59.9398, Longitude: 30.3146}, EndPoint: api.Coordinates{Latitude: 59.929, Longitude: 30.3626}, Price: 1450, Status: api.TripStatus(domaintrip.StatusActive), StartedAt: started, FinishedAt: result.FinishedAt}
+	validPath := "/api/v1/trips/" + id.String() + ""
+	invalidPath := "/api/v1/trips/not-a-uuid"
+	badTrip := *result
+	badTrip.Id = invalidPrivateID
+	badUser := *result
+	badUser.UserId = invalidPrivateID
+	badDriver := *result
+	badDriver.DriverId = invalidPrivateID
+	expect := func(trip *domaintrip.Trip, err error) func(*MockusecaseContract, context.Context) {
+		return func(uc *MockusecaseContract, ctx context.Context) {
+			uc.EXPECT().GetTrip(gomock.Cond(func(actual context.Context) bool { return actual.Done() == ctx.Done() }), id.String()).Return(trip, err)
+		}
+	}
+	tests := []struct {
+		name       string
+		path       string
+		setup      func(*MockusecaseContract, context.Context)
+		wantStatus int32
+		wantCode   string
+	}{
+		{name: "success", path: validPath, setup: expect(result, nil), wantStatus: 200},
+		{name: "not found", path: validPath, setup: expect(nil, domaintrip.ErrTripNotFound), wantStatus: 404, wantCode: "trip_not_found"},
+
+		{name: "internal error", path: validPath, setup: expect(nil, errors.New("private SQL details password=secret")), wantStatus: 500, wantCode: internalErrorCode},
+		{name: "invalid request id", path: invalidPath, setup: func(*MockusecaseContract, context.Context) {}, wantStatus: 400, wantCode: "invalid_request"},
+		{name: "invalid returned trip id", path: validPath, setup: expect(&badTrip, nil), wantStatus: 500, wantCode: internalErrorCode},
+		{name: "invalid returned user id", path: validPath, setup: expect(&badUser, nil), wantStatus: 500, wantCode: internalErrorCode},
+		{name: "invalid returned driver id", path: validPath, setup: expect(&badDriver, nil), wantStatus: 500, wantCode: internalErrorCode},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			uc := NewMockusecaseContract(ctrl)
-			started := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
-			result := domaintrip.NewTrip(domaintrip.TripId(id.String()), domaintrip.UserId(userID.String()), domaintrip.DriverId(driverID.String()), 59.9398, 30.3146, 59.929, 30.3626, 1450, started)
-
-			want := api.Trip{Id: id, UserId: userID, DriverId: driverID, StartPoint: api.Coordinates{Latitude: 59.9398, Longitude: 30.3146}, EndPoint: api.Coordinates{Latitude: 59.929, Longitude: 30.3626}, Price: 1450, Status: api.TripStatus(domaintrip.StatusActive), StartedAt: started, FinishedAt: result.FinishedAt}
-			switch tt.invalidResult {
-			case "trip":
-				result.Id = invalidPrivateID
-			case "user":
-				result.UserId = invalidPrivateID
-			case "driver":
-				result.DriverId = invalidPrivateID
-			}
-			path := "/api/v1/trips/" + id.String() + ""
-			if tt.invalidID != "" {
-				path = "/api/v1/trips/" + tt.invalidID + ""
-			}
+			path := tt.path
 			req := httptest.NewRequest(http.MethodGet, path, nil)
 			ctx, cancel := context.WithCancel(req.Context())
 			defer cancel()
 			req = req.WithContext(ctx)
-			if tt.invalidID == "" {
-				if tt.err != nil {
-					uc.EXPECT().GetTrip(gomock.Cond(func(actual context.Context) bool { return actual.Done() == ctx.Done() }), id.String()).Return(nil, tt.err)
-				} else {
-					uc.EXPECT().GetTrip(gomock.Cond(func(actual context.Context) bool { return actual.Done() == ctx.Done() }), id.String()).Return(result, nil)
-				}
-			}
+			tt.setup(uc, ctx)
 			router := api.HandlerWithOptions(testServer{handler: get.New(uc)}, api.ChiServerOptions{ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
 				domainerror.WriteInvalidRequest(w, r, "Invalid request parameter")
 			}})

@@ -13,16 +13,17 @@ import (
 
 func TestHandlerHealth(t *testing.T) {
 	for _, tt := range []struct {
-		name      string
-		cancelled bool
-	}{{name: "alive"}, {name: "cancelled request", cancelled: true}} {
+		name    string
+		prepare func(context.CancelFunc)
+	}{
+		{name: "alive", prepare: func(context.CancelFunc) {}},
+		{name: "cancelled request", prepare: func(cancel context.CancelFunc) { cancel() }},
+	} {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/health", nil)
 			ctx, cancel := context.WithCancel(req.Context())
 			defer cancel()
-			if tt.cancelled {
-				cancel()
-			}
+			tt.prepare(cancel)
 			req = req.WithContext(ctx)
 			w := httptest.NewRecorder()
 			health.New().Health(w, req)

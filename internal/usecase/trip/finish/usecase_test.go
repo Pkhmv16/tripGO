@@ -20,111 +20,146 @@ import (
 
 type transactionContextKey struct{}
 
-const (
-	failureGet    = "get"
-	failureUpdate = "update"
-)
+type fixture struct {
+	t           *testing.T
+	repo        *MocktripRepository
+	history     *MocktripStatusChangeRepository
+	tx          *MocktxManager
+	log         *Mocklogger
+	txCtx       context.Context
+	original    *domaintrip.Trip
+	snapshot    domaintrip.Trip
+	updated     *domaintrip.Trip
+	txCompleted bool
+}
+
+func (f *fixture) transaction(wantCallbackErr, result error) {
+	f.tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
+		err := fn(f.txCtx)
+		if !errors.Is(err, wantCallbackErr) {
+			f.t.Fatalf("callback error = %v, want %v", err, wantCallbackErr)
+		}
+		f.txCompleted = true
+		return result
+	})
+}
+
+func (f *fixture) readTrip() *gomock.Call {
+	return f.repo.EXPECT().GetForUpdate(f.txCtx, f.original.Id).Return(f.original, nil)
+}
+
+func (f *fixture) updateTrip(result error) *gomock.Call {
+	return f.repo.EXPECT().Update(f.txCtx, gomock.Any()).DoAndReturn(func(_ context.Context, got *domaintrip.Trip) error {
+		if got == nil || got.FinishedAt == nil {
+			f.t.Fatal("Update received a trip without finished_at")
+		}
+		want := f.snapshot
+		want.Status = domaintrip.StatusCompleted
+		want.FinishedAt = got.FinishedAt
+		want.UpdatedAt = *got.FinishedAt
+		if !reflect.DeepEqual(got, &want) {
+			f.t.Errorf("Update trip = %+v, want %+v", got, &want)
+		}
+		copied := *got
+		f.updated = &copied
+		return result
+	})
+}
+
+func (f *fixture) saveHistory(result error) *gomock.Call {
+	return f.history.EXPECT().Save(f.txCtx, gomock.Any()).DoAndReturn(func(_ context.Context, change *domaintrip.TripStatusChange) error {
+		if change.FromStatus == nil || *change.FromStatus != domaintrip.StatusActive || change.ToStatus != domaintrip.StatusCompleted {
+			f.t.Errorf("wrong transition: %+v", change)
+		}
+		if change.TripId != f.original.Id || !change.ChangedAt.Equal(*f.updated.FinishedAt) {
+			f.t.Errorf("history does not match update: %+v", change)
+		}
+		return result
+	})
+}
+
+func (f *fixture) logSuccess() {
+	f.log.EXPECT().InfoContext(gomock.Any(), "trip completed", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
+		if !f.txCompleted {
+			f.t.Error("success was logged before transaction completed")
+		}
+	})
+}
+
+func (f *fixture) logFailure(err error) {
+	f.log.EXPECT().ErrorContext(gomock.Any(), "trip completion failed", "trip_id", "trip-id", "error", err)
+}
 
 func TestUsecaseFinishTrip(t *testing.T) {
 	dependencyErr := errors.New("dependency failure")
+	startedAt := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
+	active := *domaintrip.NewTrip("trip-id", "user-id", "driver-id", 59, 30, 60, 31, 1450, startedAt)
+	completed := active
+	completed.Status = domaintrip.StatusCompleted
+	completed.FinishedAt = new(startedAt.Add(time.Hour))
+	unknown := active
+	unknown.Status = "cancelled"
+	rejectStatus := func(f *fixture) {
+		f.transaction(domaintrip.ErrTripAlreadyCompleted, domaintrip.ErrTripAlreadyCompleted)
+		f.readTrip()
+	}
 	tests := []struct {
-		name    string
-		status  domaintrip.TripStatus
-		failAt  string
-		wantErr error
+		name      string
+		trip      domaintrip.Trip
+		setup     func(*fixture)
+		wantErr   error
+		unchanged bool
 	}{
-		{name: "active trip", status: domaintrip.StatusActive},
-		{name: "completed trip", status: domaintrip.StatusCompleted, wantErr: domaintrip.ErrTripAlreadyCompleted},
-		{name: "unknown status", status: domaintrip.TripStatus("cancelled"), wantErr: domaintrip.ErrTripAlreadyCompleted},
-		{name: "trip not found", failAt: failureGet, wantErr: domaintrip.ErrTripNotFound},
-		{name: "read error", failAt: failureGet, wantErr: dependencyErr},
-		{name: "update error", status: domaintrip.StatusActive, failAt: failureUpdate, wantErr: dependencyErr},
-		{name: "history error", status: domaintrip.StatusActive, failAt: "history", wantErr: dependencyErr},
-		{name: "transaction begin error", failAt: "begin", wantErr: dependencyErr},
-		{name: "transaction commit error", status: domaintrip.StatusActive, failAt: "commit", wantErr: dependencyErr},
+		{name: "active trip", trip: active, setup: func(f *fixture) {
+			f.transaction(nil, nil)
+			gomock.InOrder(f.readTrip(), f.updateTrip(nil), f.saveHistory(nil))
+			f.logSuccess()
+		}},
+		{name: "completed trip", trip: completed, setup: rejectStatus, wantErr: domaintrip.ErrTripAlreadyCompleted, unchanged: true},
+		{name: "unknown status", trip: unknown, setup: rejectStatus, wantErr: domaintrip.ErrTripAlreadyCompleted, unchanged: true},
+		{name: "trip not found", trip: active, unchanged: true, wantErr: domaintrip.ErrTripNotFound, setup: func(f *fixture) {
+			f.transaction(domaintrip.ErrTripNotFound, domaintrip.ErrTripNotFound)
+			f.repo.EXPECT().GetForUpdate(f.txCtx, f.original.Id).Return(nil, domaintrip.ErrTripNotFound)
+		}},
+		{name: "read error", trip: active, unchanged: true, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(dependencyErr, dependencyErr)
+			f.repo.EXPECT().GetForUpdate(f.txCtx, f.original.Id).Return(nil, dependencyErr)
+			f.logFailure(dependencyErr)
+		}},
+		{name: "update error", trip: active, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(dependencyErr, dependencyErr)
+			gomock.InOrder(f.readTrip(), f.updateTrip(dependencyErr))
+			f.logFailure(dependencyErr)
+		}},
+		{name: "history error", trip: active, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(dependencyErr, dependencyErr)
+			gomock.InOrder(f.readTrip(), f.updateTrip(nil), f.saveHistory(dependencyErr))
+			f.logFailure(dependencyErr)
+		}},
+		{name: "transaction begin error", trip: active, unchanged: true, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.tx.EXPECT().Do(gomock.Any(), gomock.Any()).Return(dependencyErr)
+			f.logFailure(dependencyErr)
+		}},
+		{name: "transaction commit error", trip: active, wantErr: dependencyErr, setup: func(f *fixture) {
+			f.transaction(nil, dependencyErr)
+			gomock.InOrder(f.readTrip(), f.updateTrip(nil), f.saveHistory(nil))
+			f.logFailure(dependencyErr)
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			repo := NewMocktripRepository(ctrl)
-			history := NewMocktripStatusChangeRepository(ctrl)
-			tx := NewMocktxManager(ctrl)
-			log := NewMocklogger(ctrl)
 			tracer, recorder := newTestTracer(t)
-			uc := finish.New(repo, history, tx, log, tracer, metricnoop.Int64Counter{})
 			ctx, parent := tracer.Start(context.Background(), "HTTP")
 			defer parent.End()
-			txCtx := context.WithValue(ctx, transactionContextKey{}, "transaction")
-			txCompleted := false
-			expectCompletionLog(t, log, tt.wantErr, dependencyErr, &txCompleted)
-			startedAt := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
-			original := &domaintrip.Trip{
-				Id: "trip-id", UserId: "user-id", DriverId: "driver-id",
-				StartLatitude: 59, StartLongitude: 30, EndLatitude: 60, EndLongitude: 31, Price: 1450,
-				Status: tt.status, StartedAt: startedAt, CreatedAt: startedAt, UpdatedAt: startedAt,
+			original := tt.trip
+			f := &fixture{
+				t: t, repo: NewMocktripRepository(ctrl), history: NewMocktripStatusChangeRepository(ctrl),
+				tx: NewMocktxManager(ctrl), log: NewMocklogger(ctrl), original: &original, snapshot: tt.trip,
+				txCtx: context.WithValue(ctx, transactionContextKey{}, "transaction"),
 			}
-			if tt.status == domaintrip.StatusCompleted {
-				original.FinishedAt = new(startedAt.Add(time.Hour))
-			}
-			snapshot := *original
-			var updated *domaintrip.Trip
-			if tt.failAt == "begin" {
-				tx.EXPECT().Do(gomock.Any(), gomock.Any()).Return(tt.wantErr)
-			} else {
-				tx.EXPECT().Do(gomock.Any(), gomock.Any()).DoAndReturn(func(_ context.Context, fn func(context.Context) error) error {
-					err := fn(txCtx)
-					txCompleted = true
-					if tt.failAt == "commit" {
-						if err != nil {
-							t.Fatalf("callback error: %v", err)
-						}
-						return tt.wantErr
-					}
-					if !errors.Is(err, tt.wantErr) {
-						t.Errorf("callback error = %v, want %v", err, tt.wantErr)
-					}
-					return err
-				})
-				if tt.failAt == failureGet {
-					repo.EXPECT().GetForUpdate(txCtx, original.Id).Return(nil, tt.wantErr)
-				} else {
-					read := repo.EXPECT().GetForUpdate(txCtx, original.Id).Return(original, nil)
-					if tt.status == domaintrip.StatusActive {
-						update := repo.EXPECT().Update(txCtx, gomock.Any()).After(read).DoAndReturn(func(_ context.Context, got *domaintrip.Trip) error {
-							if got.FinishedAt == nil {
-								t.Fatal("Update received a trip without finished_at")
-							}
-							want := snapshot
-							want.Status = domaintrip.StatusCompleted
-							want.FinishedAt = got.FinishedAt
-							want.UpdatedAt = *got.FinishedAt
-							if !reflect.DeepEqual(got, &want) {
-								t.Errorf("Update trip = %+v, want %+v", got, &want)
-							}
-							copied := *got
-							updated = &copied
-							if tt.failAt == failureUpdate {
-								return tt.wantErr
-							}
-							return nil
-						})
-						if tt.failAt != failureUpdate {
-							history.EXPECT().Save(txCtx, gomock.Any()).After(update).DoAndReturn(func(_ context.Context, change *domaintrip.TripStatusChange) error {
-								if change.FromStatus == nil || *change.FromStatus != domaintrip.StatusActive || change.ToStatus != domaintrip.StatusCompleted {
-									t.Errorf("wrong transition: %+v", change)
-								}
-								if change.TripId != original.Id || !change.ChangedAt.Equal(*updated.FinishedAt) {
-									t.Errorf("history does not match update: %+v", change)
-								}
-								if tt.failAt == "history" {
-									return tt.wantErr
-								}
-								return nil
-							})
-						}
-					}
-				}
-			}
+			tt.setup(f)
+			uc := finish.New(f.repo, f.history, f.tx, f.log, tracer, metricnoop.Int64Counter{})
 			before := time.Now()
 			got, err := uc.FinishTrip(ctx, string(original.Id))
 			assertUsecaseSpan(t, recorder, parent, tt.wantErr)
@@ -136,34 +171,21 @@ func TestUsecaseFinishTrip(t *testing.T) {
 				if got != nil {
 					t.Errorf("failure returned a trip: %+v", got)
 				}
-				if tt.status != domaintrip.StatusActive && !reflect.DeepEqual(original, &snapshot) {
+				if tt.unchanged && !reflect.DeepEqual(original, f.snapshot) {
 					t.Error("rejected operation changed the trip")
 				}
 				return
 			}
-			if got == nil || updated == nil {
-				t.Fatalf("success without result or update: got=%+v updated=%+v", got, updated)
+			if got == nil || f.updated == nil {
+				t.Fatalf("success without result or update: got=%+v updated=%+v", got, f.updated)
 			}
-			if !reflect.DeepEqual(got, updated) {
-				t.Errorf("result = %+v, saved trip = %+v", got, updated)
+			if !reflect.DeepEqual(got, f.updated) {
+				t.Errorf("result = %+v, saved trip = %+v", got, f.updated)
 			}
 			if got.FinishedAt.Before(before) || got.FinishedAt.After(after) {
 				t.Errorf("finished_at = %v is outside the operation interval", got.FinishedAt)
 			}
 		})
-	}
-}
-
-func expectCompletionLog(t *testing.T, log *Mocklogger, wantErr, dependencyErr error, txCompleted *bool) {
-	t.Helper()
-	if wantErr == nil {
-		log.EXPECT().InfoContext(gomock.Any(), "trip completed", "trip_id", "trip-id").Do(func(context.Context, string, ...any) {
-			if !*txCompleted {
-				t.Error("success was logged before transaction completed")
-			}
-		})
-	} else if errors.Is(wantErr, dependencyErr) {
-		log.EXPECT().ErrorContext(gomock.Any(), "trip completion failed", "trip_id", "trip-id", "error", wantErr)
 	}
 }
 

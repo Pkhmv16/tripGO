@@ -18,49 +18,39 @@ func TestTripFinish(t *testing.T) {
 	finishedAt := startedAt.Add(time.Hour)
 	previousFinish := startedAt.Add(30 * time.Minute)
 
-	tests := []struct {
-		name       string
-		status     trip.TripStatus
-		finishedAt *time.Time
-		wantErr    error
-	}{
-		{name: "active trip", status: trip.StatusActive},
-		{name: "completed trip", status: trip.StatusCompleted, finishedAt: &previousFinish, wantErr: trip.ErrTripAlreadyCompleted},
-		{name: "unknown status", status: trip.TripStatus("cancelled"), wantErr: trip.ErrTripAlreadyCompleted},
-		{name: "empty status", wantErr: trip.ErrTripAlreadyCompleted},
-	}
+	active := *trip.NewTrip(testTripID, "user-id", "driver-id", 59, 30, 60, 31, 1450, startedAt)
+	completed := active
+	completed.Status = trip.StatusCompleted
+	completed.FinishedAt = &previousFinish
+	unknown := active
+	unknown.Status = "cancelled"
+	empty := active
+	empty.Status = ""
+	wantCompleted := active
+	wantCompleted.Status = trip.StatusCompleted
+	wantCompleted.FinishedAt = &finishedAt
+	wantCompleted.UpdatedAt = finishedAt
 
+	tests := []struct {
+		name        string
+		input, want trip.Trip
+		finishAt    time.Time
+		wantErr     error
+	}{
+		{name: "active trip", input: active, want: wantCompleted, finishAt: finishedAt},
+		{name: "completed trip", input: completed, want: completed, finishAt: finishedAt, wantErr: trip.ErrTripAlreadyCompleted},
+		{name: "unknown status", input: unknown, want: unknown, finishAt: finishedAt, wantErr: trip.ErrTripAlreadyCompleted},
+		{name: "empty status", input: empty, want: empty, finishAt: finishedAt, wantErr: trip.ErrTripAlreadyCompleted},
+		{name: "repeated finish", input: wantCompleted, want: wantCompleted, finishAt: finishedAt.Add(time.Hour), wantErr: trip.ErrTripAlreadyCompleted},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := trip.Trip{
-				Id: testTripID, UserId: "user-id", DriverId: "driver-id",
-				StartLatitude: 59, StartLongitude: 30,
-				EndLatitude: 60, EndLongitude: 31,
-				Price: 1450, Status: tt.status,
-				StartedAt: startedAt, FinishedAt: tt.finishedAt,
-				CreatedAt: startedAt, UpdatedAt: startedAt,
-			}
-			want := got
-			if tt.wantErr == nil {
-				want.Status = trip.StatusCompleted
-				want.FinishedAt = &finishedAt
-				want.UpdatedAt = finishedAt
-			}
-
-			if err := got.Finish(finishedAt); !errors.Is(err, tt.wantErr) {
+			got := tt.input
+			if err := got.Finish(tt.finishAt); !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Finish() error = %v, want %v", err, tt.wantErr)
 			}
-			if !reflect.DeepEqual(got, want) {
-				t.Errorf("Finish() trip = %+v, want %+v", got, want)
-			}
-
-			if tt.wantErr == nil {
-				if err := got.Finish(finishedAt.Add(time.Hour)); !errors.Is(err, trip.ErrTripAlreadyCompleted) {
-					t.Fatalf("repeated Finish() error = %v, want ErrTripAlreadyCompleted", err)
-				}
-				if !reflect.DeepEqual(got, want) {
-					t.Errorf("repeated Finish() changed trip: got %+v, want %+v", got, want)
-				}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Finish() trip = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

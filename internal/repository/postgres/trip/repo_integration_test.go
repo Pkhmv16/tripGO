@@ -20,8 +20,15 @@ func TestRepositoryCreateAndGet(t *testing.T) {
 	pool := testpostgres.NewPool(t)
 	repo := triprepository.NewPgTripRepository(pool, 3*time.Second)
 
-	for _, status := range []domaintrip.TripStatus{domaintrip.StatusActive, domaintrip.StatusCompleted} {
-		t.Run(string(status), func(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*domaintrip.Trip, time.Time) error
+	}{
+		{name: string(domaintrip.StatusActive), prepare: func(*domaintrip.Trip, time.Time) error { return nil }},
+		{name: string(domaintrip.StatusCompleted), prepare: (*domaintrip.Trip).Finish},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			now := time.Date(2026, 11, 1, 10, 0, 0, 123456000, time.UTC)
@@ -31,10 +38,8 @@ func TestRepositoryCreateAndGet(t *testing.T) {
 				domaintrip.DriverId(uuid.NewString()),
 				59.9398, 30.3146, -45.125, 120.875, 1450, now,
 			)
-			if status == domaintrip.StatusCompleted {
-				if err := want.Finish(now.Add(time.Hour)); err != nil {
-					t.Fatal(err)
-				}
+			if err := tt.prepare(want, now.Add(time.Hour)); err != nil {
+				t.Fatal(err)
 			}
 			if err := repo.Create(ctx, want); err != nil {
 				t.Fatalf("Create(): %v", err)
