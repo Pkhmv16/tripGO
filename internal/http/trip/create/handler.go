@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -19,10 +20,11 @@ import (
 type Handler struct {
 	usecase      usecaseContract
 	maxBodyBytes int64
+	logger       *slog.Logger
 }
 
-func New(uc usecaseContract, maxBodyBytes int64) *Handler {
-	return &Handler{usecase: uc, maxBodyBytes: maxBodyBytes}
+func New(uc usecaseContract, maxBodyBytes int64, logger *slog.Logger) *Handler {
+	return &Handler{usecase: uc, maxBodyBytes: maxBodyBytes, logger: logger}
 }
 
 func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.CreateTripParams) {
@@ -99,6 +101,7 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 
 	response, err := triphttp.ToApiTrip(trip)
 	if err != nil {
+		h.logger.ErrorContext(r.Context(), "trip response conversion failed", "trip_id", trip.Id, "error", err)
 		domainerror.Write(w, r, err)
 		return
 	}

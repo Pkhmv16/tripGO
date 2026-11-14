@@ -10,3 +10,7 @@ import (
 type tripRepository interface {
 	Get(context.Context, domaintrip.TripId) (*domaintrip.Trip, error)
 }
+
+type logger interface {
+	ErrorContext(context.Context, string, ...any)
+}

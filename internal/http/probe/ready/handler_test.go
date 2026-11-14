@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -60,7 +61,7 @@ func TestHandlerReady(t *testing.T) {
 			})
 			req := httptest.NewRequest(http.MethodGet, "/ready", nil).WithContext(requestCtx)
 			w := httptest.NewRecorder()
-			ready.New(checker, timeout).Ready(w, req)
+			ready.New(checker, timeout, slog.New(slog.DiscardHandler)).Ready(w, req)
 			if w.Code != tt.wantStatus {
 				t.Errorf("status=%d want=%d", w.Code, tt.wantStatus)
 			}

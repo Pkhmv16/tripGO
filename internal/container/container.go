@@ -102,14 +102,14 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 
 	tracer := tracing.Tracer("github.com/Pkhmv16/tripGO/internal/usecase/trip")
 	createUsecase := createusecase.New(tripRepo, historyRepo, idempotencyRepo, txManager, uuid.Generator{}, logger, tracer, tripMetrics.Created)
-	getUsecase := getusecase.New(tripRepo, tracer)
+	getUsecase := getusecase.New(tripRepo, logger, tracer)
 	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager, logger, tracer, tripMetrics.Completed)
 
-	createHandler := create.New(createUsecase, cfg.HTTPMaxBodyBytes)
-	getHandler := get.New(getUsecase)
-	finishHandler := finish.New(finishUsecase)
+	createHandler := create.New(createUsecase, cfg.HTTPMaxBodyBytes, logger)
+	getHandler := get.New(getUsecase, logger)
+	finishHandler := finish.New(finishUsecase, logger)
 	healthHandler := health.New()
-	readyHandler := ready.New(pool, cfg.DatabaseQueryTimeout)
+	readyHandler := ready.New(pool, cfg.DatabaseQueryTimeout, logger)
 
 	api.HandlerWithOptions(&transport.Handler{
 		CreateHandler: createHandler,

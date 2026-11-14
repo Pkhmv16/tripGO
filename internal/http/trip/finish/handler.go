@@ -1,6 +1,7 @@
 package finish
 
 import (
+	"log/slog"
 	"net/http"
 
 	api "github.com/Pkhmv16/tripGO/internal/generated"
@@ -9,9 +10,14 @@ import (
 	triphttp "github.com/Pkhmv16/tripGO/internal/http/trip"
 )
 
-type Handler struct{ usecase usecaseContract }
+type Handler struct {
+	usecase usecaseContract
+	logger  *slog.Logger
+}
 
-func New(uc usecaseContract) *Handler { return &Handler{usecase: uc} }
+func New(uc usecaseContract, logger *slog.Logger) *Handler {
+	return &Handler{usecase: uc, logger: logger}
+}
 
 func (h *Handler) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
 	trip, err := h.usecase.FinishTrip(r.Context(), tripId.String())
@@ -21,6 +27,7 @@ func (h *Handler) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.
 	}
 	response, err := triphttp.ToApiTrip(trip)
 	if err != nil {
+		h.logger.ErrorContext(r.Context(), "trip response conversion failed", "trip_id", trip.Id, "error", err)
 		domainerror.Write(w, r, err)
 		return
 	}

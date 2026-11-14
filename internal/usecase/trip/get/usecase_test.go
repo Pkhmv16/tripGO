@@ -3,6 +3,7 @@ package get_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"reflect"
 	"testing"
 
@@ -31,7 +32,7 @@ func TestUsecaseGetTripSuccess(t *testing.T) {
 		Return(want, nil).
 		Times(1)
 
-	uc := get.New(repo, noop.NewTracerProvider().Tracer("test"))
+	uc := get.New(repo, slog.New(slog.DiscardHandler), noop.NewTracerProvider().Tracer("test"))
 
 	got, err := uc.GetTrip(ctx, string(id))
 	if err != nil {
@@ -60,7 +61,7 @@ func TestUsecaseGetTripError(t *testing.T) {
 			id := domaintrip.TripId("1f0a9c62-4a1c-4f2e-9d33-2a4bb0f0b111")
 
 			repo.EXPECT().Get(gomock.Any(), id).Return(nil, tt.err).Times(1)
-			uc := get.New(repo, noop.NewTracerProvider().Tracer("test"))
+			uc := get.New(repo, slog.New(slog.DiscardHandler), noop.NewTracerProvider().Tracer("test"))
 
 			got, err := uc.GetTrip(ctx, string(id))
 			if !errors.Is(err, tt.err) {

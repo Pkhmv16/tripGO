@@ -2,6 +2,7 @@ package get_test
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	"go.opentelemetry.io/otel/codes"
@@ -36,7 +37,7 @@ func TestGetTripTracing(t *testing.T) {
 				span := trace.SpanFromContext(ctx).SpanContext()
 				return span.IsValid() && span.TraceID() == parent.SpanContext().TraceID() && span.SpanID() != parent.SpanContext().SpanID()
 			}), domaintrip.TripId("trip-id")).Return(nil, wantErr)
-			_, err := get.New(repo, tracer).GetTrip(ctx, "trip-id")
+			_, err := get.New(repo, slog.New(slog.DiscardHandler), tracer).GetTrip(ctx, "trip-id")
 			if err != wantErr {
 				t.Fatalf("GetTrip error = %v, want %v", err, wantErr)
 			}

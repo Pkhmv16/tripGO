@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -43,7 +44,7 @@ func (s testServer) CreateTrip(w http.ResponseWriter, r *http.Request, p api.Cre
 }
 
 func routerFor(uc *MockusecaseContract, limit int64) http.Handler {
-	return api.HandlerWithOptions(testServer{handler: create.New(uc, limit)}, api.ChiServerOptions{ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+	return api.HandlerWithOptions(testServer{handler: create.New(uc, limit, slog.New(slog.DiscardHandler))}, api.ChiServerOptions{ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
 		domainerror.WriteInvalidRequest(w, r, "Invalid request parameter")
 	}})
 }

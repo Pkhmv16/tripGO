@@ -2,6 +2,7 @@ package ready
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -12,10 +13,11 @@ import (
 type Handler struct {
 	checker readinessChecker
 	timeout time.Duration
+	logger  *slog.Logger
 }
 
-func New(checker readinessChecker, timeout time.Duration) *Handler {
-	return &Handler{checker: checker, timeout: timeout}
+func New(checker readinessChecker, timeout time.Duration, logger *slog.Logger) *Handler {
+	return &Handler{checker: checker, timeout: timeout, logger: logger}
 }
 
 func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
@@ -23,6 +25,7 @@ func (h *Handler) Ready(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := h.checker.Ping(ctx); err != nil {
+		h.logger.ErrorContext(ctx, "readiness check failed", "error", err)
 		httpresponse.JSON(w, r, http.StatusServiceUnavailable, "application/json",
 			api.HealthResponse{Status: api.Unavailable})
 		return

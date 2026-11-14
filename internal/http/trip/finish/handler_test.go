@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -83,7 +84,7 @@ func TestHandlerFinishTrip(t *testing.T) {
 			defer cancel()
 			req = req.WithContext(ctx)
 			tt.setup(uc, ctx)
-			router := api.HandlerWithOptions(testServer{handler: finish.New(uc)}, api.ChiServerOptions{ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
+			router := api.HandlerWithOptions(testServer{handler: finish.New(uc, slog.New(slog.DiscardHandler))}, api.ChiServerOptions{ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
 				domainerror.WriteInvalidRequest(w, r, "Invalid request parameter")
 			}})
 			w := httptest.NewRecorder()
