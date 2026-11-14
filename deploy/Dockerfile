@@ -13,7 +13,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
     -ldflags="-s -w" \
     -o /out/trip-service \
-    ./cmd/trip-service
+    ./cmd/service
 
 FROM gcr.io/distroless/static-debian13:nonroot
 
