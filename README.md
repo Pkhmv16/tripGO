@@ -67,6 +67,13 @@ make run
 | `OTEL_RESOURCE_ATTRIBUTES` | Атрибуты ресурса | `service.namespace=tripgo,deployment.environment=local` |
 | `OTEL_TRACES_SAMPLER` | Сэмплирование трейсов | `parentbased_always_on` |
 | `OTEL_TRACES_SAMPLER_ARG` | Доля трейсов для `traceidratio` и `parentbased_traceidratio` | `1` |
+| `OTEL_EXPORTER_OTLP_TIMEOUT` | Таймаут OTLP-экспортёров трейсов и метрик, мс | `2000` |
+| `OTEL_BSP_SCHEDULE_DELAY` | Интервал отправки пачек трейсов, мс | `1000` |
+| `OTEL_BSP_EXPORT_TIMEOUT` | Таймаут экспорта пачки трейсов, мс | `2000` |
+| `OTEL_METRIC_EXPORT_INTERVAL` | Интервал сбора и экспорта метрик, мс | `5000` |
+| `OTEL_METRIC_EXPORT_TIMEOUT` | Таймаут сбора и экспорта метрик, мс | `2000` |
+
+Настройки интервалов и таймаутов телеметрии необязательны. По умолчанию используются показанные значения. Для локальной настройки их можно переопределить в `.env.local`.
 
 ## HTTP API
 
@@ -167,7 +174,7 @@ go generate ./internal/usecase/... ./internal/http/...
 
 ## Observability
 
-Трейсы и метрики отправляются через OpenTelemetry SDK по OTLP в коллектор. Адрес и протокол задаются `OTEL_EXPORTER_OTLP_ENDPOINT` и `OTEL_EXPORTER_OTLP_PROTOCOL`. Отдельная ручка `/metrics` не требуется. Период экспорта метрик – 5 секунд.
+Трейсы и метрики отправляются через OpenTelemetry SDK по OTLP в коллектор. Адрес и протокол задаются `OTEL_EXPORTER_OTLP_ENDPOINT` и `OTEL_EXPORTER_OTLP_PROTOCOL`. Интервал экспорта метрик задаётся `OTEL_METRIC_EXPORT_INTERVAL` и по умолчанию составляет 5 секунд.
 
 В ресурс добавляются `service.name`, `service.version`, `service.namespace` и `deployment.environment`. Ссылки на Jaeger, Grafana и Prometheus выводит `tripgoctl connect`.
 

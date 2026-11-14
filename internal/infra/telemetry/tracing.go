@@ -15,10 +15,13 @@ import (
 )
 
 type TracingConfig struct {
-	Endpoint string
-	Protocol string
-	Sampler  string
-	Ratio    float64
+	Endpoint      string
+	Protocol      string
+	Sampler       string
+	Ratio         float64
+	OTLPTimeout   time.Duration
+	BatchDelay    time.Duration
+	ExportTimeout time.Duration
 }
 
 func NewTracerProvider(ctx context.Context, cfg TracingConfig, logger *slog.Logger) (*sdktrace.TracerProvider, error) {
@@ -38,9 +41,9 @@ func NewTracerProvider(ctx context.Context, cfg TracingConfig, logger *slog.Logg
 		if pathErr != nil {
 			return nil, fmt.Errorf("build OTLP trace URL: %w", pathErr)
 		}
-		exporter, err = otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(endpoint), otlptracehttp.WithTimeout(2*time.Second))
+		exporter, err = otlptracehttp.New(ctx, otlptracehttp.WithEndpointURL(endpoint), otlptracehttp.WithTimeout(cfg.OTLPTimeout))
 	case "grpc":
-		exporter, err = otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(cfg.Endpoint), otlptracegrpc.WithTimeout(2*time.Second))
+		exporter, err = otlptracegrpc.New(ctx, otlptracegrpc.WithEndpointURL(cfg.Endpoint), otlptracegrpc.WithTimeout(cfg.OTLPTimeout))
 	default:
 		return nil, fmt.Errorf("unsupported OTLP protocol %q", cfg.Protocol)
 	}
@@ -48,7 +51,11 @@ func NewTracerProvider(ctx context.Context, cfg TracingConfig, logger *slog.Logg
 		return nil, fmt.Errorf("create trace exporter: %w", err)
 	}
 
-	return sdktrace.NewTracerProvider(sdktrace.WithResource(res), sdktrace.WithSampler(sampler), sdktrace.WithBatcher(exporter, sdktrace.WithBatchTimeout(time.Second), sdktrace.WithExportTimeout(2*time.Second))), nil
+	return sdktrace.NewTracerProvider(
+		sdktrace.WithResource(res),
+		sdktrace.WithSampler(sampler),
+		sdktrace.WithBatcher(exporter, sdktrace.WithBatchTimeout(cfg.BatchDelay), sdktrace.WithExportTimeout(cfg.ExportTimeout)),
+	), nil
 }
 
 func newSampler(cfg TracingConfig) (sdktrace.Sampler, error) {

@@ -46,11 +46,25 @@ type Container struct {
 
 func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	logger := telemetry.NewLogger(os.Stdout, cfg.LogLevel)
-	tracing, err := telemetry.NewTracerProvider(ctx, telemetry.TracingConfig{Endpoint: cfg.OTelEndpoint, Protocol: cfg.OTelProtocol, Sampler: cfg.OTelSampler, Ratio: cfg.OTelSamplerRatio}, logger)
+	tracing, err := telemetry.NewTracerProvider(ctx, telemetry.TracingConfig{
+		Endpoint:      cfg.OTelEndpoint,
+		Protocol:      cfg.OTelProtocol,
+		Sampler:       cfg.OTelSampler,
+		Ratio:         cfg.OTelSamplerRatio,
+		OTLPTimeout:   cfg.OTelOTLPTimeout,
+		BatchDelay:    cfg.OTelTraceBatchDelay,
+		ExportTimeout: cfg.OTelTraceExportTimeout,
+	}, logger)
 	if err != nil {
 		return nil, err
 	}
-	metrics, err := telemetry.NewMeterProvider(ctx, telemetry.MetricsConfig{Endpoint: cfg.OTelEndpoint, Protocol: cfg.OTelProtocol})
+	metrics, err := telemetry.NewMeterProvider(ctx, telemetry.MetricsConfig{
+		Endpoint:      cfg.OTelEndpoint,
+		Protocol:      cfg.OTelProtocol,
+		OTLPTimeout:   cfg.OTelOTLPTimeout,
+		Interval:      cfg.OTelMetricInterval,
+		ExportTimeout: cfg.OTelMetricTimeout,
+	})
 	if err != nil {
 		return nil, errors.Join(err, tracing.Shutdown(ctx))
 	}

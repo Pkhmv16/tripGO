@@ -13,16 +13,21 @@ import (
 )
 
 type Config struct {
-	OTelEndpoint          string
-	OTelProtocol          string
-	OTelSampler           string
-	OTelSamplerRatio      float64
-	HTTPAddr              string
-	HTTPReadTimeout       time.Duration
-	HTTPReadHeaderTimeout time.Duration
-	HTTPWriteTimeout      time.Duration
-	HTTPIdleTimeout       time.Duration
-	HTTPMaxBodyBytes      int64
+	OTelEndpoint           string
+	OTelProtocol           string
+	OTelSampler            string
+	OTelSamplerRatio       float64
+	OTelOTLPTimeout        time.Duration
+	OTelTraceBatchDelay    time.Duration
+	OTelTraceExportTimeout time.Duration
+	OTelMetricInterval     time.Duration
+	OTelMetricTimeout      time.Duration
+	HTTPAddr               string
+	HTTPReadTimeout        time.Duration
+	HTTPReadHeaderTimeout  time.Duration
+	HTTPWriteTimeout       time.Duration
+	HTTPIdleTimeout        time.Duration
+	HTTPMaxBodyBytes       int64
 
 	LogLevel        slog.Level
 	ShutdownTimeout time.Duration
@@ -128,7 +133,7 @@ func LoadConfig() (Config, error) {
 		)
 	}
 
-	if err := cfg.loadTracing(); err != nil {
+	if err := cfg.loadTelemetry(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -183,7 +188,7 @@ func readPositiveInt64(name string) (int64, error) {
 	return value, nil
 }
 
-func (cfg *Config) loadTracing() error {
+func (cfg *Config) loadTelemetry() error {
 	cfg.OTelEndpoint = strings.TrimSpace(os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
 	endpoint, err := url.Parse(cfg.OTelEndpoint)
 	if err != nil || endpoint.Host == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
@@ -204,5 +209,35 @@ func (cfg *Config) loadTracing() error {
 			return fmt.Errorf("OTEL_TRACES_SAMPLER_ARG must be between 0 and 1")
 		}
 	}
+	durations := []struct {
+		name         string
+		target       *time.Duration
+		defaultValue time.Duration
+	}{
+		{"OTEL_EXPORTER_OTLP_TIMEOUT", &cfg.OTelOTLPTimeout, 2 * time.Second},
+		{"OTEL_BSP_SCHEDULE_DELAY", &cfg.OTelTraceBatchDelay, time.Second},
+		{"OTEL_BSP_EXPORT_TIMEOUT", &cfg.OTelTraceExportTimeout, 2 * time.Second},
+		{"OTEL_METRIC_EXPORT_INTERVAL", &cfg.OTelMetricInterval, 5 * time.Second},
+		{"OTEL_METRIC_EXPORT_TIMEOUT", &cfg.OTelMetricTimeout, 2 * time.Second},
+	}
+	for _, setting := range durations {
+		value, err := readMilliseconds(setting.name, setting.defaultValue)
+		if err != nil {
+			return err
+		}
+		*setting.target = value
+	}
 	return nil
+}
+
+func readMilliseconds(name string, defaultValue time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 || value > math.MaxInt64/int64(time.Millisecond) {
+		return 0, fmt.Errorf("%s must be a positive duration in whole milliseconds", name)
+	}
+	return time.Duration(value) * time.Millisecond, nil
 }
