@@ -24,6 +24,7 @@ import (
 	"github.com/Pkhmv16/tripGO/internal/http/trip/create"
 	"github.com/Pkhmv16/tripGO/internal/http/trip/finish"
 	"github.com/Pkhmv16/tripGO/internal/http/trip/get"
+	"github.com/Pkhmv16/tripGO/internal/http/trip/listpositions"
 	"github.com/Pkhmv16/tripGO/internal/http/trip/saveposition"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres"
 	"github.com/Pkhmv16/tripGO/internal/infra/postgres/transaction"
@@ -36,6 +37,7 @@ import (
 	createusecase "github.com/Pkhmv16/tripGO/internal/usecase/trip/create"
 	finishusecase "github.com/Pkhmv16/tripGO/internal/usecase/trip/finish"
 	getusecase "github.com/Pkhmv16/tripGO/internal/usecase/trip/get"
+	listpositionsusecase "github.com/Pkhmv16/tripGO/internal/usecase/trip/listpositions"
 	savepositionusecase "github.com/Pkhmv16/tripGO/internal/usecase/trip/saveposition"
 )
 
@@ -107,7 +109,9 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	createUsecase := createusecase.New(tripRepo, historyRepo, idempotencyRepo, txManager, uuid.Generator{}, logger, tracer, tripMetrics.Created)
 	getUsecase := getusecase.New(tripRepo, logger, tracer)
 	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager, logger, tracer, tripMetrics.Completed)
-	savePositionUsecase := savepositionusecase.New(tripRepo, tripposition.New(pool, cfg.DatabaseQueryTimeout), txManager, logger, tripMetrics.PositionsSaved)
+	positionRepo := tripposition.New(pool, cfg.DatabaseQueryTimeout)
+	savePositionUsecase := savepositionusecase.New(tripRepo, positionRepo, txManager, logger, tripMetrics.PositionsSaved)
+	listPositionsUsecase := listpositionsusecase.New(tripRepo, positionRepo, logger)
 
 	createHandler := create.New(createUsecase, cfg.HTTPMaxBodyBytes, logger)
 	getHandler := get.New(getUsecase, logger)
@@ -116,12 +120,13 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	readyHandler := ready.New(pool, cfg.DatabaseQueryTimeout, logger)
 
 	api.HandlerWithOptions(&transport.Handler{
-		CreateHandler:       createHandler,
-		GetHandler:          getHandler,
-		FinishHandler:       finishHandler,
-		HealthHandler:       healthHandler,
-		ReadyHandler:        readyHandler,
-		SavePositionHandler: saveposition.New(savePositionUsecase, cfg.HTTPMaxBodyBytes),
+		CreateHandler:        createHandler,
+		GetHandler:           getHandler,
+		FinishHandler:        finishHandler,
+		HealthHandler:        healthHandler,
+		ReadyHandler:         readyHandler,
+		SavePositionHandler:  saveposition.New(savePositionUsecase, cfg.HTTPMaxBodyBytes),
+		ListPositionsHandler: listpositions.New(listPositionsUsecase, logger),
 	}, api.ChiServerOptions{
 		BaseRouter: router,
 		ErrorHandlerFunc: func(w http.ResponseWriter, r *http.Request, err error) {
