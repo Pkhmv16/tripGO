@@ -36,6 +36,7 @@ func (r *PgTripRepository) get(ctx context.Context, tripId domaintrip.TripId, fo
 		"status",
 		"started_at",
 		"finished_at",
+		"last_position_at",
 		"created_at",
 		"updated_at",
 	).From("trips").
@@ -68,6 +69,7 @@ func (r *PgTripRepository) get(ctx context.Context, tripId domaintrip.TripId, fo
 		&trip.Status,
 		&trip.StartedAt,
 		&trip.FinishedAt,
+		&trip.LastPositionAt,
 		&trip.CreatedAt,
 		&trip.UpdatedAt,
 	)
