@@ -13,6 +13,8 @@ import (
 )
 
 type Config struct {
+	PositionCheckInterval  time.Duration
+	PositionStaleAfter     time.Duration
 	OTelEndpoint           string
 	OTelProtocol           string
 	OTelSampler            string
@@ -119,7 +121,7 @@ func LoadConfig() (Config, error) {
 	}
 
 	for _, settings := range durations {
-		value, err := readPositiveDuration(settings.name)
+		value, err := readPositiveDuration(settings.name, 0)
 		if err != nil {
 			return Config{}, err
 		}
@@ -134,6 +136,14 @@ func LoadConfig() (Config, error) {
 	}
 
 	if err := cfg.loadTelemetry(); err != nil {
+		return Config{}, err
+	}
+	cfg.PositionCheckInterval, err = readPositiveDuration("POSITION_CHECK_INTERVAL", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.PositionStaleAfter, err = readPositiveDuration("POSITION_STALE_AFTER", time.Minute)
+	if err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
@@ -153,9 +163,12 @@ func readInt32(name string) (int32, error) {
 	return int32(value), nil
 }
 
-func readPositiveDuration(name string) (time.Duration, error) {
+func readPositiveDuration(name string, defaultValue time.Duration) (time.Duration, error) {
 	raw := strings.TrimSpace(os.Getenv(name))
 	if raw == "" {
+		if defaultValue > 0 {
+			return defaultValue, nil
+		}
 		return 0, fmt.Errorf("%s is required", name)
 	}
 
