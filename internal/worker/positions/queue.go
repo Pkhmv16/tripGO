@@ -4,11 +4,14 @@ import (
 	"context"
 	"sync"
 
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/Pkhmv16/tripGO/internal/domain/trip"
 )
 
 type Task struct {
 	candidate trip.PositionCandidate
+	scanSpan  trace.SpanContext
 	started   bool
 }
 
@@ -26,7 +29,7 @@ func NewQueue(capacity int) *Queue {
 	}
 }
 
-func (q *Queue) TryEnqueue(_ context.Context, candidate trip.PositionCandidate) EnqueueResult {
+func (q *Queue) TryEnqueue(ctx context.Context, candidate trip.PositionCandidate) EnqueueResult {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -37,7 +40,7 @@ func (q *Queue) TryEnqueue(_ context.Context, candidate trip.PositionCandidate) 
 		return Duplicate
 	}
 
-	task := &Task{candidate: candidate}
+	task := &Task{candidate: candidate, scanSpan: trace.SpanContextFromContext(ctx)}
 	select {
 	case q.tasks <- task:
 		q.pending[candidate.TripID] = task

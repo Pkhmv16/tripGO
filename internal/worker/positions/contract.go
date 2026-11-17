@@ -21,6 +21,10 @@ type ticker interface {
 	Stop()
 }
 
+type pushGateway interface {
+	RequestPosition(context.Context, trip.PositionCandidate) error
+}
+
 type EnqueueResult string
 
 const (

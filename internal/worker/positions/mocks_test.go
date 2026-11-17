@@ -145,3 +145,41 @@ func (mr *MocktickerMockRecorder) Ticks() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Ticks", reflect.TypeOf((*Mockticker)(nil).Ticks))
 }
+
+// MockpushGateway is a mock of pushGateway interface.
+type MockpushGateway struct {
+	ctrl     *gomock.Controller
+	recorder *MockpushGatewayMockRecorder
+	isgomock struct{}
+}
+
+// MockpushGatewayMockRecorder is the mock recorder for MockpushGateway.
+type MockpushGatewayMockRecorder struct {
+	mock *MockpushGateway
+}
+
+// NewMockpushGateway creates a new mock instance.
+func NewMockpushGateway(ctrl *gomock.Controller) *MockpushGateway {
+	mock := &MockpushGateway{ctrl: ctrl}
+	mock.recorder = &MockpushGatewayMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockpushGateway) EXPECT() *MockpushGatewayMockRecorder {
+	return m.recorder
+}
+
+// RequestPosition mocks base method.
+func (m *MockpushGateway) RequestPosition(arg0 context.Context, arg1 trip.PositionCandidate) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RequestPosition", arg0, arg1)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RequestPosition indicates an expected call of RequestPosition.
+func (mr *MockpushGatewayMockRecorder) RequestPosition(arg0, arg1 any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RequestPosition", reflect.TypeOf((*MockpushGateway)(nil).RequestPosition), arg0, arg1)
+}
