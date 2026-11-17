@@ -21,6 +21,10 @@ type txManager interface {
 	Do(context.Context, func(context.Context) error) error
 }
 
+type positionRequestQueue interface {
+	Cancel(trip.TripId)
+}
+
 type logger interface {
 	ErrorContext(context.Context, string, ...any)
 }

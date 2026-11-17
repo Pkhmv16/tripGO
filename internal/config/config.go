@@ -15,6 +15,10 @@ import (
 type Config struct {
 	PositionCheckInterval  time.Duration
 	PositionStaleAfter     time.Duration
+	PositionWorkers        int
+	PositionQueueSize      int
+	PushHTTPURL            string
+	PushRequestTimeout     time.Duration
 	OTelEndpoint           string
 	OTelProtocol           string
 	OTelSampler            string
@@ -138,15 +142,48 @@ func LoadConfig() (Config, error) {
 	if err := cfg.loadTelemetry(); err != nil {
 		return Config{}, err
 	}
-	cfg.PositionCheckInterval, err = readPositiveDuration("POSITION_CHECK_INTERVAL", 30*time.Second)
-	if err != nil {
-		return Config{}, err
-	}
-	cfg.PositionStaleAfter, err = readPositiveDuration("POSITION_STALE_AFTER", time.Minute)
-	if err != nil {
+	if err := cfg.loadPositionPolling(); err != nil {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func (cfg *Config) loadPositionPolling() error {
+	var err error
+	cfg.PositionCheckInterval, err = readPositiveDuration("POSITION_CHECK_INTERVAL", 30*time.Second)
+	if err != nil {
+		return err
+	}
+	cfg.PositionStaleAfter, err = readPositiveDuration("POSITION_STALE_AFTER", time.Minute)
+	if err != nil {
+		return err
+	}
+	cfg.PositionWorkers, err = readPositiveInt("POSITION_WORKERS", 4)
+	if err != nil {
+		return err
+	}
+	cfg.PositionQueueSize, err = readPositiveInt("POSITION_QUEUE_SIZE", 100)
+	if err != nil {
+		return err
+	}
+	cfg.PushHTTPURL = strings.TrimSpace(os.Getenv("PUSH_HTTP_URL"))
+	if cfg.PushHTTPURL == "" {
+		return fmt.Errorf("PUSH_HTTP_URL is required")
+	}
+	cfg.PushRequestTimeout, err = readPositiveDuration("PUSH_REQUEST_TIMEOUT", time.Second)
+	return err
+}
+
+func readPositiveInt(name string, defaultValue int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
+	}
+	return value, nil
 }
 
 func readInt32(name string) (int32, error) {

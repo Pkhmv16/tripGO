@@ -29,6 +29,10 @@ func NewQueue(capacity int) *Queue {
 	}
 }
 
+func (q *Queue) Len() int {
+	return len(q.tasks)
+}
+
 func (q *Queue) TryEnqueue(ctx context.Context, candidate trip.PositionCandidate) EnqueueResult {
 	q.mu.Lock()
 	defer q.mu.Unlock()

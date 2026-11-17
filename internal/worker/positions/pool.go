@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
@@ -21,6 +22,7 @@ type Pool struct {
 	tracer         trace.Tracer
 	requests       metric.Int64Counter
 	duration       metric.Float64Histogram
+	active         atomic.Int64
 }
 
 func NewPool(queue *Queue, push pushGateway, workers int, requestTimeout time.Duration, logger *slog.Logger, tracer trace.Tracer, requests metric.Int64Counter, duration metric.Float64Histogram) *Pool {
@@ -38,6 +40,10 @@ func (p *Pool) Run(ctx context.Context) {
 	workers.Wait()
 }
 
+func (p *Pool) Active() int64 {
+	return p.active.Load()
+}
+
 func (p *Pool) runWorker(ctx context.Context) {
 	for {
 		task, ok := p.queue.Next(ctx)
@@ -50,6 +56,8 @@ func (p *Pool) runWorker(ctx context.Context) {
 
 func (p *Pool) process(ctx context.Context, task *Task) {
 	defer p.queue.Done(task)
+	p.active.Add(1)
+	defer p.active.Add(-1)
 
 	ctx, span := p.tracer.Start(ctx, "positions.process", trace.WithNewRoot(), trace.WithLinks(trace.Link{SpanContext: task.scanSpan}))
 	defer span.End()

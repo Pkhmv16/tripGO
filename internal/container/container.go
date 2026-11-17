@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -42,11 +43,13 @@ import (
 )
 
 type Container struct {
-	server  *http.Server
-	pool    *pgxpool.Pool
-	logger  *slog.Logger
-	tracing *sdktrace.TracerProvider
-	metrics *sdkmetric.MeterProvider
+	server          *http.Server
+	pool            *pgxpool.Pool
+	logger          *slog.Logger
+	tracing         *sdktrace.TracerProvider
+	metrics         *sdkmetric.MeterProvider
+	positions       *positionPolling
+	shutdownTimeout time.Duration
 }
 
 func New(ctx context.Context, cfg config.Config) (*Container, error) {
@@ -97,6 +100,12 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		pool.Close()
 		return nil, errors.Join(err, tracing.Shutdown(ctx), metrics.Shutdown(ctx))
 	}
+	polling, err := newPositionPolling(cfg, tripRepo, logger, tracing, metrics)
+	if err != nil {
+		shutdownErr := errors.Join(metrics.Shutdown(ctx), tracing.Shutdown(ctx))
+		pool.Close()
+		return nil, errors.Join(err, shutdownErr)
+	}
 
 	historyRepo := tripstatushistory.NewPgTripStatusChangeRepository(pool, cfg.DatabaseQueryTimeout)
 
@@ -110,7 +119,7 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	getUsecase := getusecase.New(tripRepo, logger, tracer)
 	finishUsecase := finishusecase.New(tripRepo, historyRepo, txManager, logger, tracer, tripMetrics.Completed)
 	positionRepo := tripposition.New(pool, cfg.DatabaseQueryTimeout)
-	savePositionUsecase := savepositionusecase.New(tripRepo, positionRepo, txManager, logger, tripMetrics.PositionsSaved)
+	savePositionUsecase := savepositionusecase.New(tripRepo, positionRepo, txManager, polling.queue, logger, tripMetrics.PositionsSaved)
 	listPositionsUsecase := listpositionsusecase.New(tripRepo, positionRepo, logger)
 
 	createHandler := create.New(createUsecase, cfg.HTTPMaxBodyBytes, logger)
@@ -144,23 +153,43 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
-	return &Container{server: server, pool: pool, logger: logger, tracing: tracing, metrics: metrics}, nil
+	return &Container{
+		server: server, pool: pool, logger: logger, tracing: tracing, metrics: metrics,
+		positions: polling, shutdownTimeout: cfg.ShutdownTimeout,
+	}, nil
 }
 
-func (c *Container) Run() error {
+func (c *Container) Run(ctx context.Context) error {
 	listener, err := net.Listen("tcp", c.server.Addr)
 	if err != nil {
-		return fmt.Errorf("listen HTTP: %w", err)
+		return errors.Join(fmt.Errorf("listen HTTP: %w", err), c.shutdown(ctx, nil))
 	}
+	stopPolling := c.positions.start(context.WithoutCancel(ctx))
 	c.logger.Info("service started", "address", listener.Addr().String())
-	err = c.server.Serve(listener)
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return fmt.Errorf("serve HTTP: %w", err)
+	serverDone := make(chan error, 1)
+	go func() {
+		err := c.server.Serve(listener)
+		if errors.Is(err, http.ErrServerClosed) {
+			err = nil
+		} else if err != nil {
+			err = fmt.Errorf("serve HTTP: %w", err)
+		}
+		serverDone <- err
+	}()
+
+	select {
+	case err := <-serverDone:
+		return errors.Join(err, c.shutdown(ctx, stopPolling))
+	case <-ctx.Done():
+		shutdownErr := c.shutdown(ctx, stopPolling)
+		return errors.Join(<-serverDone, shutdownErr)
 	}
-	return nil
 }
 
-func (c *Container) Shutdown(ctx context.Context) error {
+func (c *Container) shutdown(parent context.Context, stopPolling func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), c.shutdownTimeout)
+	defer cancel()
+
 	c.logger.InfoContext(ctx, "service stopping")
 	var shutdownErr error
 	if err := c.server.Shutdown(ctx); err != nil {
@@ -169,6 +198,10 @@ func (c *Container) Shutdown(ctx context.Context) error {
 			shutdownErr = errors.Join(shutdownErr, fmt.Errorf("close HTTP: %w", closeErr))
 		}
 	}
+	if stopPolling != nil {
+		shutdownErr = errors.Join(shutdownErr, stopPolling(ctx))
+	}
+	c.positions.push.CloseIdleConnections()
 	shutdownErr = errors.Join(shutdownErr, c.metrics.Shutdown(ctx))
 	poolClosed := make(chan struct{})
 	go func() {

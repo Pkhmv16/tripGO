@@ -23,6 +23,7 @@ type fixture struct {
 	trips     *MocktripRepository
 	positions *MockpositionRepository
 	tx        *MocktxManager
+	requests  *MockpositionRequestQueue
 }
 
 func (f *fixture) expectTransaction() {
@@ -47,12 +48,14 @@ func TestSavePosition(t *testing.T) {
 		wantErr error
 	}{
 		{name: "success", want: saved, setup: func(f *fixture) {
-			f.expectTransaction()
+			committed := f.tx.EXPECT().Do(f.ctx, gomock.Any()).
+				DoAndReturn(func(_ context.Context, run func(context.Context) error) error { return run(f.txCtx) })
 			gomock.InOrder(
 				f.trips.EXPECT().GetForUpdate(f.txCtx, input.TripID).Return(active, nil),
 				f.positions.EXPECT().Save(f.txCtx, input).Return(saved, nil),
 				f.trips.EXPECT().UpdateLastPosition(f.txCtx, saved.TripID, saved.RecordedAt).Return(nil),
 			)
+			f.requests.EXPECT().Cancel(saved.TripID).After(committed)
 		}},
 		{name: "trip not found", wantErr: trip.ErrTripNotFound, setup: func(f *fixture) {
 			f.expectTransaction()
@@ -79,6 +82,20 @@ func TestSavePosition(t *testing.T) {
 				f.trips.EXPECT().GetForUpdate(f.txCtx, input.TripID).Return(active, nil),
 				f.positions.EXPECT().Save(f.txCtx, input).Return(saved, nil),
 				f.trips.EXPECT().UpdateLastPosition(f.txCtx, saved.TripID, saved.RecordedAt).Return(databaseErr),
+			)
+		}},
+		{name: "commit failed", wantErr: databaseErr, setup: func(f *fixture) {
+			f.tx.EXPECT().Do(f.ctx, gomock.Any()).
+				DoAndReturn(func(_ context.Context, run func(context.Context) error) error {
+					if err := run(f.txCtx); err != nil {
+						return err
+					}
+					return databaseErr
+				})
+			gomock.InOrder(
+				f.trips.EXPECT().GetForUpdate(f.txCtx, input.TripID).Return(active, nil),
+				f.positions.EXPECT().Save(f.txCtx, input).Return(saved, nil),
+				f.trips.EXPECT().UpdateLastPosition(f.txCtx, saved.TripID, saved.RecordedAt).Return(nil),
 			)
 		}},
 	}
@@ -128,6 +145,7 @@ func newUsecase(t *testing.T) (*fixture, *saveposition.Usecase) {
 	f := &fixture{
 		ctx: ctx, txCtx: context.WithValue(ctx, transactionContextKey{}, struct{}{}),
 		trips: NewMocktripRepository(ctrl), positions: NewMockpositionRepository(ctrl), tx: NewMocktxManager(ctrl),
+		requests: NewMockpositionRequestQueue(ctrl),
 	}
-	return f, saveposition.New(f.trips, f.positions, f.tx, slog.New(slog.DiscardHandler), noop.Int64Counter{})
+	return f, saveposition.New(f.trips, f.positions, f.tx, f.requests, slog.New(slog.DiscardHandler), noop.Int64Counter{})
 }

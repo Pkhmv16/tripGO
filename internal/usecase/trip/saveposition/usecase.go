@@ -14,12 +14,13 @@ type Usecase struct {
 	trips     tripRepository
 	positions positionRepository
 	tx        txManager
+	requests  positionRequestQueue
 	logger    logger
 	saved     metric.Int64Counter
 }
 
-func New(trips tripRepository, positions positionRepository, tx txManager, log logger, saved metric.Int64Counter) *Usecase {
-	return &Usecase{trips: trips, positions: positions, tx: tx, logger: log, saved: saved}
+func New(trips tripRepository, positions positionRepository, tx txManager, requests positionRequestQueue, log logger, saved metric.Int64Counter) *Usecase {
+	return &Usecase{trips: trips, positions: positions, tx: tx, requests: requests, logger: log, saved: saved}
 }
 
 func (uc *Usecase) SavePosition(ctx context.Context, position trip.Position) (trip.Position, error) {
@@ -48,6 +49,7 @@ func (uc *Usecase) SavePosition(ctx context.Context, position trip.Position) (tr
 		}
 		return trip.Position{}, err
 	}
+	uc.requests.Cancel(saved.TripID)
 	uc.saved.Add(ctx, 1)
 	return saved, nil
 }

@@ -35,4 +35,4 @@ test:
 	go test -race -cover ./...
 
 test-integration:
-	go test -race -p=1 -tags=integration -count=1 -timeout=5m ./internal/infra/postgres/transaction ./internal/repository/postgres/trip
+	go test -race -p=1 -tags=integration -count=1 -timeout=5m ./internal/infra/postgres/transaction ./internal/repository/postgres/trip ./internal/usecase/trip/saveposition
