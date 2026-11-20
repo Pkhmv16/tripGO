@@ -37,7 +37,7 @@ func TestPoolLimitsConcurrentRequestsAndDrainsClosedQueue(t *testing.T) {
 				})
 		}
 
-		pool := newTestPool(queue, push, workerCount, time.Second)
+		pool := newTestPool(queue, push, workerCount)
 		done := make(chan struct{})
 		go func() {
 			pool.Run(t.Context())
@@ -67,7 +67,6 @@ func TestPoolContinuesAfterPushErrorAndTimeout(t *testing.T) {
 		queue.Cancel(skipped.TripID)
 
 		push := NewMockpushGateway(gomock.NewController(t))
-		const timeout = time.Second
 		var timeoutErr error
 		gomock.InOrder(
 			push.EXPECT().RequestPosition(gomock.Any(), failed).Return(errors.New("push unavailable")),
@@ -81,7 +80,7 @@ func TestPoolContinuesAfterPushErrorAndTimeout(t *testing.T) {
 		)
 
 		queue.Close()
-		newTestPool(queue, push, 1, timeout).Run(t.Context())
+		newTestPool(queue, push, 1).Run(t.Context())
 		if !errors.Is(timeoutErr, context.DeadlineExceeded) {
 			t.Fatalf("slow request error = %v, want deadline exceeded", timeoutErr)
 		}
@@ -108,7 +107,7 @@ func TestPoolStopsWhenContextIsCancelled(t *testing.T) {
 
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		pool := newTestPool(queue, push, 1, time.Second)
+		pool := newTestPool(queue, push, 1)
 		done := make(chan struct{})
 		go func() {
 			pool.Run(ctx)
@@ -138,7 +137,7 @@ func enqueueCandidates(t *testing.T, candidates ...trip.PositionCandidate) *posi
 	return queue
 }
 
-func newTestPool(queue *positions.Queue, push *MockpushGateway, workers int, timeout time.Duration) *positions.Pool {
-	return positions.NewPool(queue, push, workers, timeout, slog.New(slog.DiscardHandler),
+func newTestPool(queue *positions.Queue, push *MockpushGateway, workers int) *positions.Pool {
+	return positions.NewPool(queue, push, workers, time.Second, slog.New(slog.DiscardHandler),
 		tracenoop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{}, metricnoop.Float64Histogram{})
 }

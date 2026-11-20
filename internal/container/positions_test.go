@@ -10,12 +10,17 @@ import (
 
 	metricnoop "go.opentelemetry.io/otel/metric/noop"
 	tracenoop "go.opentelemetry.io/otel/trace/noop"
+	"go.uber.org/goleak"
 
 	"github.com/Pkhmv16/tripGO/internal/domain/trip"
 	"github.com/Pkhmv16/tripGO/internal/worker/positions"
 )
 
 type pushFunc func(context.Context, trip.PositionCandidate) error
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
+}
 
 func (f pushFunc) RequestPosition(ctx context.Context, candidate trip.PositionCandidate) error {
 	return f(ctx, candidate)
