@@ -81,6 +81,14 @@ linters:
               desc: HTTP работает через интерфейсы usecase
             - pkg: github.com/Pkhmv16/tripGO/internal/infra
               desc: HTTP не создаёт инфраструктурные зависимости
+        repository:
+          files:
+            - "**/internal/repository/**"
+          deny:
+            - pkg: github.com/Pkhmv16/tripGO/internal/usecase
+              desc: репозиторий не зависит от бизнес-сценариев
+            - pkg: github.com/Pkhmv16/tripGO/internal/http
+              desc: репозиторий не зависит от HTTP-обработчиков
 
     # Запрещает обращения через идентификатор с подчёркиванием, поэтому пакеты
     # называем без snake_case: internal/adapter/http, а не internal/adapter/http_server.

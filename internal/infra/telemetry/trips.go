@@ -12,8 +12,9 @@ type activeTripCounter interface {
 }
 
 type TripMetrics struct {
-	Created   metric.Int64Counter
-	Completed metric.Int64Counter
+	Created        metric.Int64Counter
+	Completed      metric.Int64Counter
+	PositionsSaved metric.Int64Counter
 }
 
 func NewTripMetrics(ctx context.Context, meter metric.Meter, trips activeTripCounter) (*TripMetrics, error) {
@@ -24,6 +25,10 @@ func NewTripMetrics(ctx context.Context, meter metric.Meter, trips activeTripCou
 	completed, err := meter.Int64Counter("tripgo.trips.completed", metric.WithUnit("{trip}"), metric.WithDescription("Number of trips completed"))
 	if err != nil {
 		return nil, fmt.Errorf("create trips completed metric: %w", err)
+	}
+	positionsSaved, err := meter.Int64Counter("tripgo.positions.saved", metric.WithUnit("{position}"), metric.WithDescription("Number of saved trip positions"))
+	if err != nil {
+		return nil, fmt.Errorf("create saved positions metric: %w", err)
 	}
 	active, err := meter.Int64ObservableGauge("tripgo.trips.active", metric.WithUnit("{trip}"), metric.WithDescription("Number of active trips"))
 	if err != nil {
@@ -42,5 +47,5 @@ func NewTripMetrics(ctx context.Context, meter metric.Meter, trips activeTripCou
 	}
 	created.Add(ctx, 0)
 	completed.Add(ctx, 0)
-	return &TripMetrics{Created: created, Completed: completed}, nil
+	return &TripMetrics{Created: created, Completed: completed, PositionsSaved: positionsSaved}, nil
 }

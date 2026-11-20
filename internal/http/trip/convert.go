@@ -41,6 +41,19 @@ func ToApiTrip(trip *trip.Trip) (*api.Trip, error) {
 		Status:         api.TripStatus(trip.Status),
 		StartedAt:      trip.StartedAt,
 		FinishedAt:     trip.FinishedAt,
-		LastPositionAt: nil,
+		LastPositionAt: trip.LastPositionAt,
+	}, nil
+}
+
+func ToApiTripPosition(position trip.Position) (api.TripPosition, error) {
+	id, err := uuid.Parse(string(position.TripID))
+	if err != nil {
+		return api.TripPosition{}, fmt.Errorf("convert position trip id: %w", err)
+	}
+	return api.TripPosition{
+		Id:          position.ID,
+		TripId:      id,
+		Coordinates: api.Coordinates{Latitude: position.Latitude, Longitude: position.Longitude},
+		RecordedAt:  position.RecordedAt,
 	}, nil
 }

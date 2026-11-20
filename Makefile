@@ -17,7 +17,7 @@ lint:
 generate:
 	go tool oapi-codegen \
 		-generate types,chi-server \
-		-include-operation-ids createTrip,getTrip,finishTrip,health,ready \
+		-include-operation-ids createTrip,getTrip,finishTrip,createTripPosition,listTripPositions,health,ready \
 		-package api \
 		-o internal/generated/api.gen.go \
 		contracts/openapi/trip-service.openapi.yaml
@@ -35,4 +35,4 @@ test:
 	go test -race -cover ./...
 
 test-integration:
-	go test -race -p=1 -tags=integration -count=1 -timeout=5m ./internal/infra/postgres/transaction ./internal/repository/postgres/trip
+	go test -race -p=1 -tags=integration -count=1 -timeout=5m ./internal/infra/postgres/transaction ./internal/repository/postgres/trip ./internal/usecase/trip/saveposition

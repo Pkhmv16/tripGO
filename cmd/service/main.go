@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -36,19 +35,5 @@ func run() error {
 		return fmt.Errorf("build application: %w", err)
 	}
 
-	serverErrors := make(chan error, 1)
-	go func() {
-		serverErrors <- app.Run()
-	}()
-
-	var runErr error
-	select {
-	case <-signalCtx.Done():
-	case runErr = <-serverErrors:
-	}
-	stop()
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
-	return errors.Join(runErr, app.Shutdown(shutdownCtx))
+	return app.Run(signalCtx)
 }
