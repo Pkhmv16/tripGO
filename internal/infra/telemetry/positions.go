@@ -11,6 +11,7 @@ type PositionMetrics struct {
 	StaleChecks      metric.Int64Counter
 	PositionRequests metric.Int64Counter
 	RequestDuration  metric.Float64Histogram
+	RowsRead         metric.Int64Histogram
 }
 
 func NewPositionMetrics(meter metric.Meter) (PositionMetrics, error) {
@@ -26,7 +27,11 @@ func NewPositionMetrics(meter metric.Meter) (PositionMetrics, error) {
 	if err != nil {
 		return PositionMetrics{}, fmt.Errorf("create position request duration metric: %w", err)
 	}
-	return PositionMetrics{StaleChecks: staleChecks, PositionRequests: requests, RequestDuration: duration}, nil
+	rowsRead, err := meter.Int64Histogram("tripgo.stale_checks.rows", metric.WithUnit("{row}"))
+	if err != nil {
+		return PositionMetrics{}, fmt.Errorf("create stale scan rows metric: %w", err)
+	}
+	return PositionMetrics{StaleChecks: staleChecks, PositionRequests: requests, RequestDuration: duration, RowsRead: rowsRead}, nil
 }
 
 func ObservePositionPolling(meter metric.Meter, queueSize func() int, activeWorkers func() int64) error {

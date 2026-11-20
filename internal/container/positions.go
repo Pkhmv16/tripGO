@@ -38,7 +38,7 @@ func newPositionPolling(cfg config.Config, trips *triprepository.PgTripRepositor
 	}
 	queue := positions.NewQueue(cfg.PositionQueueSize)
 	tracer := tracing.Tracer(scope)
-	scanner := positions.NewScanner(trips, queue, cfg.PositionStaleAfter, logger, tracer, instruments.StaleChecks, instruments.PositionRequests)
+	scanner := positions.NewScanner(trips, queue, cfg.PositionStaleAfter, cfg.PositionBatchSize, logger, tracer, instruments.StaleChecks, instruments.PositionRequests, instruments.RowsRead)
 	workers := positions.NewPool(queue, gateway, cfg.PositionWorkers, cfg.PushRequestTimeout, logger, tracer, instruments.PositionRequests, instruments.RequestDuration)
 	if err := telemetry.ObservePositionPolling(meter, queue.Len, workers.Active); err != nil {
 		return nil, err

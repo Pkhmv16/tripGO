@@ -99,7 +99,7 @@ func testPositionPolling(t *testing.T, push pushFunc) *positionPolling {
 	counter := metricnoop.Int64Counter{}
 	return &positionPolling{
 		queue:    queue,
-		scanner:  positions.NewScanner(nil, queue, time.Minute, logger, tracer, counter, counter),
+		scanner:  positions.NewScanner(nil, queue, time.Minute, 100, logger, tracer, counter, counter, metricnoop.Int64Histogram{}),
 		workers:  positions.NewPool(queue, push, 1, time.Minute, logger, tracer, counter, metricnoop.Float64Histogram{}),
 		interval: time.Hour,
 	}

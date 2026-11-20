@@ -30,12 +30,12 @@ func TestScannerDeduplicatesTripsAcrossTicks(t *testing.T) {
 		ticker.EXPECT().Ticks().Return((<-chan time.Time)(ticks))
 		ticker.EXPECT().Stop()
 		candidate := trip.PositionCandidate{TripID: "repeated"}
-		repo.EXPECT().ListStaleTrips(gomock.Any(), time.Minute).
+		repo.EXPECT().ListStaleTrips(gomock.Any(), time.Minute, 100, nil).
 			Return([]trip.PositionCandidate{candidate}, nil).Times(2)
 		queue := positions.NewQueue(2)
 		defer queue.Close()
-		scanner := positions.NewScanner(repo, queue, time.Minute, slog.New(slog.DiscardHandler),
-			tracenoop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{}, metricnoop.Int64Counter{})
+		scanner := positions.NewScanner(repo, queue, time.Minute, 100, slog.New(slog.DiscardHandler),
+			tracenoop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{}, metricnoop.Int64Counter{}, metricnoop.Int64Histogram{})
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		done := make(chan struct{})
@@ -70,11 +70,11 @@ func TestScannerContinuesAfterQueueFills(t *testing.T) {
 		ticker.EXPECT().Ticks().Return((<-chan time.Time)(ticks))
 		ticker.EXPECT().Stop()
 		candidates := []trip.PositionCandidate{{TripID: "retained"}, {TripID: "overflow"}}
-		repo.EXPECT().ListStaleTrips(gomock.Any(), time.Minute).Return(candidates, nil).Times(2)
+		repo.EXPECT().ListStaleTrips(gomock.Any(), time.Minute, 100, nil).Return(candidates, nil).Times(2)
 		queue := positions.NewQueue(1)
 		defer queue.Close()
-		scanner := positions.NewScanner(repo, queue, time.Minute, slog.New(slog.DiscardHandler),
-			tracenoop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{}, metricnoop.Int64Counter{})
+		scanner := positions.NewScanner(repo, queue, time.Minute, 100, slog.New(slog.DiscardHandler),
+			tracenoop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{}, metricnoop.Int64Counter{}, metricnoop.Int64Histogram{})
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		done := make(chan struct{})
@@ -119,7 +119,7 @@ func TestScannerProcessesTicksSequentiallyAndStops(t *testing.T) {
 		}
 		var queries atomic.Int32
 		gomock.InOrder(
-			repo.EXPECT().ListStaleTrips(gomock.Any(), staleAfter).DoAndReturn(func(scanCtx context.Context, _ time.Duration) ([]trip.PositionCandidate, error) {
+			repo.EXPECT().ListStaleTrips(gomock.Any(), staleAfter, 100, nil).DoAndReturn(func(scanCtx context.Context, _ time.Duration, _ int, _ *trip.PositionCursor) ([]trip.PositionCandidate, error) {
 				queries.Add(1)
 				select {
 				case <-firstScan:
@@ -131,15 +131,15 @@ func TestScannerProcessesTicksSequentiallyAndStops(t *testing.T) {
 			queue.EXPECT().TryEnqueue(gomock.Any(), candidates[0]).Return(positions.Queued),
 			queue.EXPECT().TryEnqueue(gomock.Any(), candidates[1]).Return(positions.Duplicate),
 			queue.EXPECT().TryEnqueue(gomock.Any(), candidates[2]).Return(positions.Dropped),
-			repo.EXPECT().ListStaleTrips(gomock.Any(), staleAfter).DoAndReturn(func(scanCtx context.Context, _ time.Duration) ([]trip.PositionCandidate, error) {
+			repo.EXPECT().ListStaleTrips(gomock.Any(), staleAfter, 100, nil).DoAndReturn(func(scanCtx context.Context, _ time.Duration, _ int, _ *trip.PositionCursor) ([]trip.PositionCandidate, error) {
 				queries.Add(1)
 				<-scanCtx.Done()
 				return nil, scanCtx.Err()
 			}),
 		)
 
-		scanner := positions.NewScanner(repo, queue, staleAfter, slog.New(slog.DiscardHandler),
-			tracenoop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{}, metricnoop.Int64Counter{})
+		scanner := positions.NewScanner(repo, queue, staleAfter, 100, slog.New(slog.DiscardHandler),
+			tracenoop.NewTracerProvider().Tracer("test"), metricnoop.Int64Counter{}, metricnoop.Int64Counter{}, metricnoop.Int64Histogram{})
 		done := make(chan struct{})
 		go func() {
 			defer close(done)

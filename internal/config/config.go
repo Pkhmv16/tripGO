@@ -17,6 +17,7 @@ type Config struct {
 	PositionStaleAfter     time.Duration
 	PositionWorkers        int
 	PositionQueueSize      int
+	PositionBatchSize      int
 	PushHTTPURL            string
 	PushRequestTimeout     time.Duration
 	OTelEndpoint           string
@@ -163,6 +164,10 @@ func (cfg *Config) loadPositionPolling() error {
 		return err
 	}
 	cfg.PositionQueueSize, err = readPositiveInt("POSITION_QUEUE_SIZE", 100)
+	if err != nil {
+		return err
+	}
+	cfg.PositionBatchSize, err = readPositiveInt("POSITION_BATCH_SIZE", 100)
 	if err != nil {
 		return err
 	}

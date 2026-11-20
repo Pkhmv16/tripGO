@@ -44,18 +44,18 @@ func (m *MockstaleTripRepository) EXPECT() *MockstaleTripRepositoryMockRecorder 
 }
 
 // ListStaleTrips mocks base method.
-func (m *MockstaleTripRepository) ListStaleTrips(arg0 context.Context, arg1 time.Duration) ([]trip.PositionCandidate, error) {
+func (m *MockstaleTripRepository) ListStaleTrips(arg0 context.Context, arg1 time.Duration, arg2 int, arg3 *trip.PositionCursor) ([]trip.PositionCandidate, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListStaleTrips", arg0, arg1)
+	ret := m.ctrl.Call(m, "ListStaleTrips", arg0, arg1, arg2, arg3)
 	ret0, _ := ret[0].([]trip.PositionCandidate)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListStaleTrips indicates an expected call of ListStaleTrips.
-func (mr *MockstaleTripRepositoryMockRecorder) ListStaleTrips(arg0, arg1 any) *gomock.Call {
+func (mr *MockstaleTripRepositoryMockRecorder) ListStaleTrips(arg0, arg1, arg2, arg3 any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListStaleTrips", reflect.TypeOf((*MockstaleTripRepository)(nil).ListStaleTrips), arg0, arg1)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListStaleTrips", reflect.TypeOf((*MockstaleTripRepository)(nil).ListStaleTrips), arg0, arg1, arg2, arg3)
 }
 
 // Mockqueue is a mock of queue interface.

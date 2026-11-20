@@ -9,7 +9,7 @@ import (
 )
 
 type staleTripRepository interface {
-	ListStaleTrips(context.Context, time.Duration) ([]trip.PositionCandidate, error)
+	ListStaleTrips(context.Context, time.Duration, int, *trip.PositionCursor) ([]trip.PositionCandidate, error)
 }
 
 type queue interface {
